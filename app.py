@@ -13,7 +13,7 @@ orchestration in ``reviewer.py``.
 import threading
 import time
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request, url_for
 
 import agents
 import providers
@@ -193,6 +193,12 @@ def start_watcher():
 # --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
+@app.route("/favicon.ico")
+def favicon():
+    """Browsers request /favicon.ico directly; point them at the SVG icon."""
+    return redirect(url_for("static", filename="icon.svg"))
+
+
 @app.route("/")
 def index():
     repos = storage.repo_stats()

@@ -379,7 +379,8 @@ pr-reviewer/
 │   ├── index.html         # Repo selector + request queue
 │   └── pr_detail.html     # Request details + AI review panel
 └── static/
-    └── theme.css          # Shared light/dark palette and base chrome
+    ├── theme.css          # Shared light/dark palette and base chrome
+    └── icon.svg           # App icon: pull request + review check (favicon + navbar)
 ```
 
 ## Troubleshooting
