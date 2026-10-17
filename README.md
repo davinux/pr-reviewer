@@ -1,11 +1,11 @@
 # PR Reviewer
 
 Review **GitHub pull requests** and **GitLab merge requests** with a local
-coding agent. PR Reviewer lists the open requests across the repositories you
-care about, and on demand it clones the repository, checks out the request, and
-runs an installed agent CLI ([opencode](https://opencode.ai), `pi`, Claude Code,
-GitHub Copilot, or a custom command) to produce a review you can read in the
-browser.
+coding agent. PR Reviewer lists the requests across the repositories you care
+about — open, closed and merged — and on demand it clones the repository, checks
+out the request, and runs an installed agent CLI
+([opencode](https://opencode.ai), `pi`, Claude Code, GitHub Copilot, or a custom
+command) to produce a review you can read in the browser.
 
 There is no automatic review: reviews run only when you ask for them. Data stays
 on your machine except the GitHub/GitLab API calls and whatever your chosen
@@ -20,6 +20,9 @@ agent does.
   other CLI.
 - **Selectable repositories** — pick a repo from the sidebar to see just its
   requests, or "All repositories".
+- **Status tabs** — the request list is split into **Open**, **Closed**,
+  **Merged** and **All** tabs, each with a live count, so finished requests no
+  longer clutter the ones still needing attention.
 - **Rich request view** — Markdown description and comments, author, labels,
   draft status, branches, diff stats and metadata.
 - **Commits & changes** — the request page lists the commits and shows a
@@ -32,7 +35,8 @@ agent does.
   with its latest status, and you can clear the ones you are done with.
 - **Local storage** — repositories, requests, comments and reviews live in
   SQLite under a single `data/` folder.
-- **Sync on demand** — a button fetches open requests from the hosts when asked.
+- **Sync on demand** — a button fetches requests from the hosts when asked,
+  including their current open/closed/merged state.
 - **Watch for new PRs** — optionally watch individual repositories; new
   pull/merge requests show a notification and play a short sound.
 - **Light / dark theme** — a toggle in the navbar; it defaults to your system
@@ -134,8 +138,10 @@ the same path on different hosts never collide.
    self-hosted hosts), choose a default agent and model, tweak the review prompt,
    and set any limits. Everything is saved to `data/settings.json`.
 2. Add a repository in the sidebar.
-3. Click **Sync PRs** to fetch the open pull/merge requests.
-4. Select a repository to filter, then click a request to open it.
+3. Click **Sync PRs** to fetch the pull/merge requests, including their current
+   open/closed/merged state.
+4. Select a repository to filter, then use the **Open**, **Closed**, **Merged**
+   and **All** tabs to pick the requests you want; click one to open it.
 5. On the request page use the **Conversation**, **Commits** and **Files
    changed** tabs: read the description and comments, browse the commits, and
    review the diffs (switch between **Unified** and **Split** layouts).
@@ -163,6 +169,8 @@ Notes:
 - A repository's **first** sync only establishes a baseline — the requests that
   already existed are stored without notifying, so you are not flooded when you
   enable watching.
+- Only **open** requests raise a notification. Closed and merged requests are
+  still stored so their status stays accurate, but they never alert.
 - Browsers block sound until you interact with the page. Click anywhere once and
   the notification chime will play for subsequent new requests.
 - The background watcher only polls watched repositories; unwatched ones are
@@ -336,10 +344,10 @@ backfilled). `data/` is gitignored. To reset, stop the app and delete the folder
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `GET` | `/` | Dashboard. Optional `?repo=<slug>`. |
+| `GET` | `/` | Dashboard. Optional `?repo=<slug>` and `?state=open\|closed\|merged\|all`. |
 | `GET` | `/pr/<id>` | Request detail page with the review panel. |
-| `POST` | `/api/sync` | Fetch open requests from every repo now. |
-| `GET` | `/api/prs` | Stored requests (optional `?repo=<slug>`). |
+| `POST` | `/api/sync` | Fetch requests (open, closed and merged) from every repo now. |
+| `GET` | `/api/prs` | Stored requests (optional `?repo=<slug>&state=<state>`). |
 | `GET` | `/api/pr/<id>` | One stored request as JSON. |
 | `GET` | `/api/pr/<id>/commits` | Commits in the request (live from the host). |
 | `GET` | `/api/pr/<id>/files` | Changed files with unified diffs (live from the host). |

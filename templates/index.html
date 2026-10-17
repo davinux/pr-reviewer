@@ -105,6 +105,21 @@
             border: 1px solid var(--app-border); border-radius: 999px; padding: 0 .5rem;
             margin: 0 .2rem .1rem 0; background: var(--app-surface); color: var(--app-muted);
         }
+        .state-pill {
+            display: inline-block; font-size: .66rem; font-weight: 700;
+            text-transform: uppercase; letter-spacing: .04em;
+            border-radius: 999px; padding: .08rem .55rem; color: #fff;
+            background: var(--app-icon);
+        }
+        .state-pill.state-open { background: #1f883d; }
+        .state-pill.state-closed { background: #cf222e; }
+        .state-pill.state-merged { background: #8250df; }
+        .pr-state-tabs .nav-link {
+            color: var(--app-muted); font-weight: 600; padding: .4rem .9rem;
+        }
+        .pr-state-tabs .nav-link:hover { color: var(--app-text); }
+        .pr-state-tabs .nav-link.active { color: var(--app-accent); }
+        .pr-state-tabs .badge { vertical-align: middle; }
         .empty-state { text-align: center; color: var(--app-muted); padding: 3.5rem 1rem; }
         .empty-state .empty-icon { font-size: 2rem; opacity: .45; line-height: 1; }
         .diff-stat { font-size: .8rem; font-family: var(--app-mono); }
@@ -198,7 +213,7 @@
                 <a class="repo-item repo-link {% if not selected %}active{% endif %}"
                    href="/" style="padding:.4rem .5rem;">
                     <span class="name">All repositories</span>
-                    <span class="count-badge">{{ total_prs }}</span>
+                    <span class="count-badge">{{ open_prs }}</span>
                 </a>
             </div>
 
@@ -214,7 +229,7 @@
                         {% if repo.host != 'github.com' %}
                         <span class="host-tag">{{ repo.host }}</span>
                         {% endif %}
-                        <span class="count-badge">{{ repo.count }}</span>
+                        <span class="count-badge">{{ repo.open_count }}</span>
                     </a>
                     <button class="repo-watch {% if repo.watch %}active{% endif %}"
                             title="{{ 'Watching for new PRs — click to stop' if repo.watch else 'Watch this repo for new PRs' }}"
@@ -279,11 +294,21 @@
                         <span class="host-tag">{{ selected.host }}</span>
                         {% endif %}
                     </h4>
-                    <span class="muted small">
-                        <span id="repoCount">{{ repo_total }}</span> open pull request(s)
-                    </span>
+                    <span class="muted small">{{ state_summary }}</span>
                 </div>
             </div>
+
+            <ul class="nav nav-tabs pr-state-tabs mb-3" role="tablist">
+                {% for key, label in state_tabs %}
+                <li class="nav-item" role="presentation">
+                    <a class="nav-link {% if state == key %}active{% endif %}"
+                       href="{{ url_for('index', repo=selected_slug, state=key) }}">
+                        {{ label }}
+                        <span class="badge app-count-badge">{{ pr_counts[key] }}</span>
+                    </a>
+                </li>
+                {% endfor %}
+            </ul>
 
             {% if pr_data %}
             <div class="card">
@@ -297,6 +322,7 @@
                                 <th>Author</th>
                                 <th>Labels</th>
                                 <th style="width:90px;">Comments</th>
+                                <th style="width:110px;">Status</th>
                                 <th style="width:130px;">Updated</th>
                             </tr>
                         </thead>
@@ -340,6 +366,11 @@
                                         {{ pr.comments | length }}
                                     </span>
                                 </td>
+                                <td>
+                                    <span class="state-pill state-{{ pr.state or 'open' }}">
+                                        {{ pr.state or 'open' }}
+                                    </span>
+                                </td>
                                 <td class="muted small">{{ (pr.updated_at or '')[:10] }}</td>
                             </tr>
                             {% endfor %}
@@ -350,13 +381,16 @@
             {% else %}
             <div class="empty-state">
                 <div class="empty-icon">&#128269;</div>
-                <h5 class="mt-2">No pull requests yet</h5>
+                <h5 class="mt-2">No pull requests</h5>
                 <p>
-                    {% if repos %}
-                    Nothing stored for this selection. Click <strong>Sync PRs</strong> to fetch
-                    open requests.
-                    {% else %}
+                    {% if not repos %}
                     Add a GitHub or GitLab repository, then click <strong>Sync PRs</strong>.
+                    {% elif state == 'all' %}
+                    Nothing stored for this selection. Click <strong>Sync PRs</strong> to fetch
+                    open, closed and merged requests.
+                    {% else %}
+                    No {{ state }} requests stored for this selection. Click
+                    <strong>Sync PRs</strong>, or switch to the <strong>All</strong> tab.
                     {% endif %}
                 </p>
             </div>

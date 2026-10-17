@@ -233,6 +233,9 @@ def _backfill_provider_columns(conn):
     conn.execute(
         "UPDATE pull_requests SET slug = host || '/' || full_name WHERE slug IS NULL OR slug = ''"
     )
+    # Rows stored before states were tracked were all open requests; default
+    # them so the "Open" tab and the per-state counts agree.
+    conn.execute("UPDATE pull_requests SET state = 'open' WHERE state IS NULL OR state = ''")
 
 
 # --------------------------------------------------------------------------- #
@@ -351,13 +354,19 @@ def set_repo_watch(slug, watch):
 
 
 def repo_stats():
-    """Return every repository with the number of stored pull requests."""
+    """Return every repository with the number of stored pull requests.
+
+    ``count`` is the total stored for the repo; ``open_count`` is how many are
+    still open, which is what the sidebar badge shows now that closed and merged
+    requests are kept too.
+    """
     with get_conn() as conn:
         rows = conn.execute(
             """
             SELECT r.full_name AS full_name, r.provider AS provider,
                    r.host AS host, r.slug AS slug, r.watch AS watch,
-                   COUNT(p.id) AS count
+                   COUNT(p.id) AS count,
+                   COUNT(CASE WHEN p.state = 'open' THEN 1 END) AS open_count
             FROM repos r
             LEFT JOIN pull_requests p ON p.repo_id = r.id
             GROUP BY r.id
@@ -464,30 +473,34 @@ def get_pr(pr_id):
     return _pr_dict(row, [_comment_dict(c) for c in comment_rows])
 
 
-def list_prs(repo=None):
-    """Return stored pull requests (newest first), optionally for one repo slug."""
+def list_prs(repo=None, state=None):
+    """Return stored pull requests (newest first).
+
+    Optionally narrowed to one repo slug and/or one state (``open``, ``closed``,
+    ``merged``); ``state="all"`` (or ``None``) does not filter by state.
+    """
+    where = []
+    params = []
+    if repo:
+        where.append("(slug = ? OR full_name = ?)")
+        params.extend((repo, repo))
+    if state and state != "all":
+        where.append("state = ?")
+        params.append(state)
+    clause = f" WHERE {' AND '.join(where)}" if where else ""
+
     with get_conn() as conn:
-        if repo:
-            pr_rows = conn.execute(
-                "SELECT * FROM pull_requests WHERE slug = ? OR full_name = ? "
-                "ORDER BY created_at DESC",
-                (repo, repo),
-            ).fetchall()
+        pr_rows = conn.execute(
+            f"SELECT * FROM pull_requests{clause} ORDER BY created_at DESC", params
+        ).fetchall()
+        comment_rows = []
+        if pr_rows:
             pr_ids = [row["id"] for row in pr_rows]
-            comment_rows = []
-            if pr_ids:
-                placeholders = ",".join("?" for _ in pr_ids)
-                comment_rows = conn.execute(
-                    f"SELECT * FROM comments WHERE pr_id IN ({placeholders}) "
-                    "ORDER BY created_at ASC",
-                    pr_ids,
-                ).fetchall()
-        else:
-            pr_rows = conn.execute(
-                "SELECT * FROM pull_requests ORDER BY created_at DESC"
-            ).fetchall()
+            placeholders = ",".join("?" for _ in pr_ids)
             comment_rows = conn.execute(
-                "SELECT * FROM comments ORDER BY created_at ASC"
+                f"SELECT * FROM comments WHERE pr_id IN ({placeholders}) "
+                "ORDER BY created_at ASC",
+                pr_ids,
             ).fetchall()
 
     comments = {}
@@ -496,16 +509,49 @@ def list_prs(repo=None):
     return [_pr_dict(row, comments.get(row["id"], [])) for row in pr_rows]
 
 
-def count_prs(repo=None):
+def count_prs(repo=None, state=None):
+    """Count stored pull requests, optionally for one repo and/or state."""
+    where = []
+    params = []
+    if repo:
+        where.append("(slug = ? OR full_name = ?)")
+        params.extend((repo, repo))
+    if state and state != "all":
+        where.append("state = ?")
+        params.append(state)
+    clause = f" WHERE {' AND '.join(where)}" if where else ""
     with get_conn() as conn:
-        if repo:
-            row = conn.execute(
-                "SELECT COUNT(*) AS n FROM pull_requests WHERE slug = ? OR full_name = ?",
-                (repo, repo),
-            ).fetchone()
-        else:
-            row = conn.execute("SELECT COUNT(*) AS n FROM pull_requests").fetchone()
+        row = conn.execute(
+            f"SELECT COUNT(*) AS n FROM pull_requests{clause}", params
+        ).fetchone()
     return row["n"]
+
+
+def pr_state_counts(repo=None):
+    """Number of stored pull requests per state, plus an ``all`` total.
+
+    Used to label the status tabs in the UI. Any unrecognised state is folded
+    into its own key rather than being dropped.
+    """
+    where = ""
+    params = []
+    if repo:
+        where = " WHERE slug = ? OR full_name = ?"
+        params = [repo, repo]
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT state, COUNT(*) AS n FROM pull_requests{where} GROUP BY state",
+            params,
+        ).fetchall()
+
+    counts = {"open": 0, "closed": 0, "merged": 0}
+    total = 0
+    for row in rows:
+        total += row["n"]
+        key = row["state"] or "open"
+        counts[key] = counts.get(key, 0) + row["n"]
+    counts["all"] = total
+    return counts
 
 
 def _load_labels(raw):

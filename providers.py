@@ -165,8 +165,10 @@ class GitHub:
         if gh is None:
             return []
         try:
+            # Fetch every state so requests that have since been closed or merged
+            # are updated instead of lingering as "open" in storage.
             pulls = gh.get_repo(repo["full_name"]).get_pulls(
-                state="open", sort="created", direction="asc"
+                state="all", sort="created", direction="asc"
             )
         except Exception as exc:  # noqa: BLE001
             print(f"Error fetching PRs for {repo['slug']}: {exc}")
@@ -251,6 +253,17 @@ class GitHub:
         return files
 
 
+def _github_state(pull):
+    """Normalise a GitHub PR state, telling merged pulls from plain closed ones.
+
+    GitHub reports a merged pull request with ``state == "closed"``; the merged
+    flag is what distinguishes it, so the UI can offer a separate "Merged" tab.
+    """
+    if pull.state == "open":
+        return "open"
+    return "merged" if _safe(lambda: pull.merged) else "closed"
+
+
 def _github_entry(pull, repo):
     try:
         avatar = pull.user.avatar_url
@@ -268,7 +281,7 @@ def _github_entry(pull, repo):
         "body": pull.body,
         "created_at": _iso(pull.created_at),
         "updated_at": _iso(pull.updated_at),
-        "state": pull.state,
+        "state": _github_state(pull),
         "url": pull.html_url,
         "draft": bool(getattr(pull, "draft", False)),
         "labels": _safe(lambda: [label.name for label in pull.labels]) or [],
@@ -326,10 +339,12 @@ class GitLab:
 
     def fetch_resources(self, repo, token, settings=None):
         try:
+            # Fetch every state so requests that have since been closed or merged
+            # are updated instead of lingering as "open" in storage.
             data = self._get_all(
                 f"{self._base(repo, settings)}/merge_requests",
                 token,
-                {"state": "opened", "order_by": "created_at", "sort": "asc", "per_page": 100},
+                {"state": "all", "order_by": "created_at", "sort": "asc", "per_page": 100},
             )
         except Exception as exc:  # noqa: BLE001
             print(f"Error fetching MRs for {repo['slug']}: {exc}")

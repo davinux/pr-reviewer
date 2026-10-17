@@ -55,6 +55,8 @@
         .diff-add { color: var(--app-add); font-weight: 600; }
         .diff-del { color: var(--app-del); font-weight: 600; }
         .state-open { background: #1f883d; }
+        .state-merged { background: #8250df; }
+        .state-closed { background: #cf222e; }
         #reviewOutput { min-height: 1rem; }
 
         /* Commits */
@@ -149,7 +151,7 @@
                         <span class="text-muted fw-normal">#{{ pr.number }}</span>
                     </h3>
                     <div class="d-flex align-items-center gap-2 flex-wrap">
-                        <span class="badge {% if pr.state == 'open' %}state-open{% else %}bg-secondary{% endif %}">
+                        <span class="badge {% if pr.state == 'open' %}state-open{% elif pr.state == 'merged' %}state-merged{% elif pr.state == 'closed' %}state-closed{% else %}bg-secondary{% endif %}">
                             {{ pr.state }}
                         </span>
                         {% if pr.draft %}<span class="badge bg-secondary">Draft</span>{% endif %}
