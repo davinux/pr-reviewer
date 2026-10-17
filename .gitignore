@@ -1,0 +1,10 @@
+# Local data folder (settings + SQLite database)
+data/
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+.venv/
+venv/
+informe_hardware.txt

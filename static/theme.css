@@ -1,0 +1,249 @@
+/* Shared design tokens, palette and base chrome for PR Reviewer.
+ *
+ * Bootstrap's color modes (the `data-bs-theme` attribute on <html>) drive its
+ * own components — modals, forms, tables, buttons, badges, alerts. The `--app-*`
+ * variables below cover the app's custom styles so they follow the same theme.
+ * The active theme is set by an inline script in each page's <head> and toggled
+ * from the navbar; see `toggleTheme` there.
+ */
+
+:root {
+    /* Palette */
+    --app-page-bg: #f6f8fa;
+    --app-surface: #ffffff;
+    --app-surface-alt: #f6f8fa;
+    --app-border: #d0d7de;
+    --app-text: #24292f;
+    --app-muted: #57606a;
+    --app-navbar-bg: #24292f;
+    --app-navbar-fg: #ffffff;
+    --app-navbar-link: #c9d1d9;
+    --app-accent: #0969da;
+    --app-active-bg: #ddf4ff;
+    --app-hover-bg: #f3f4f6;
+    --app-badge-bg: #eaeef2;
+    --app-badge-fg: #57606a;
+    --app-icon: #8c959f;
+    --app-danger: #cf222e;
+    --app-danger-bg: #ffebe9;
+    --app-add: #1a7f37;
+    --app-del: #cf222e;
+    --app-code-bg: rgba(175, 184, 193, .2);
+    --diff-add-bg: #e6ffec;
+    --diff-del-bg: #ffebe9;
+    --diff-hunk-bg: #ddf4ff;
+    --diff-empty-bg: #f6f8fa;
+
+    /* Shape & depth */
+    --app-radius: 10px;
+    --app-radius-sm: 8px;
+    --app-shadow-sm: 0 1px 2px rgba(15, 23, 42, .06);
+    --app-shadow-md: 0 6px 18px rgba(15, 23, 42, .10);
+    --app-transition: .15s ease;
+
+    /* Typography */
+    --app-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji",
+        "Segoe UI Emoji";
+    --app-mono: ui-monospace, SFMono-Regular, Menlo, Consolas,
+        "Liberation Mono", monospace;
+
+    /* Let Bootstrap round its own components to match the app. */
+    --bs-border-radius: .6rem;
+    --bs-border-radius-sm: .5rem;
+    --bs-border-radius-lg: .75rem;
+
+    color-scheme: light;
+}
+
+[data-bs-theme="dark"] {
+    --app-page-bg: #0d1117;
+    --app-surface: #161b22;
+    --app-surface-alt: #161b22;
+    --app-border: #30363d;
+    --app-text: #c9d1d9;
+    --app-muted: #8b949e;
+    --app-navbar-bg: #161b22;
+    --app-navbar-fg: #f0f6fc;
+    --app-navbar-link: #8b949e;
+    --app-accent: #58a6ff;
+    --app-active-bg: rgba(56, 139, 253, .15);
+    --app-hover-bg: #21262d;
+    --app-badge-bg: #21262d;
+    --app-badge-fg: #8b949e;
+    --app-icon: #6e7681;
+    --app-danger: #f85149;
+    --app-danger-bg: rgba(248, 81, 73, .15);
+    --app-add: #3fb950;
+    --app-del: #f85149;
+    --app-code-bg: rgba(110, 118, 129, .4);
+    --diff-add-bg: rgba(46, 160, 67, .18);
+    --diff-del-bg: rgba(248, 81, 73, .18);
+    --diff-hunk-bg: rgba(56, 139, 253, .12);
+    --diff-empty-bg: #0d1117;
+    --app-shadow-sm: 0 1px 2px rgba(0, 0, 0, .35);
+    --app-shadow-md: 0 8px 22px rgba(0, 0, 0, .45);
+    color-scheme: dark;
+}
+
+body {
+    background: var(--app-page-bg);
+    color: var(--app-text);
+    font-family: var(--app-font);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+a { color: var(--app-accent); }
+a:hover { color: var(--app-accent); }
+
+/* Slim, themed scrollbars. */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--app-border) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: var(--app-border);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--app-icon); background-clip: padding-box; }
+
+/* ------------------------------------------------------------------ Navbar */
+.app-navbar {
+    background: var(--app-navbar-bg);
+    color: var(--app-navbar-fg);
+    border-bottom: 1px solid rgba(255, 255, 255, .08);
+    box-shadow: var(--app-shadow-sm);
+    position: sticky;
+    top: 0;
+    z-index: 1030;
+    min-height: 56px;
+}
+.app-navbar .navbar-brand {
+    color: var(--app-navbar-fg);
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+}
+.app-navbar a { color: var(--app-navbar-link); text-decoration: none; }
+.app-navbar a:hover { color: var(--app-navbar-fg); }
+.app-brand-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    margin-right: .5rem;
+    background: var(--app-accent);
+    color: #fff;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .02em;
+}
+[data-bs-theme="dark"] .app-brand-mark { color: #0d1117; }
+
+/* ------------------------------------------------------------------- Panels */
+.panel {
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius);
+    box-shadow: var(--app-shadow-sm);
+    overflow: hidden;
+}
+.panel-header {
+    padding: .7rem 1rem;
+    border-bottom: 1px solid var(--app-border);
+    background: var(--app-surface-alt);
+    border-radius: var(--app-radius) var(--app-radius) 0 0;
+    font-weight: 600;
+}
+.panel-body { padding: 1rem; }
+
+/* Rounded Bootstrap cards inherit the same shape and shadow. */
+.card {
+    border-color: var(--app-border);
+    border-radius: var(--app-radius);
+    box-shadow: var(--app-shadow-sm);
+    overflow: hidden;
+}
+
+/* ------------------------------------------------------------------- Tables */
+.table { --bs-table-border-color: var(--app-border); }
+.app-thead th {
+    background: var(--app-surface-alt) !important;
+    color: var(--app-muted);
+    border-color: var(--app-border);
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    font-weight: 600;
+}
+
+/* --------------------------------------------------------- Small elements */
+.muted { color: var(--app-muted); }
+.badge { font-weight: 600; letter-spacing: .01em; }
+.app-count-badge {
+    background: var(--app-badge-bg);
+    color: var(--app-badge-fg);
+    border: 1px solid var(--app-border);
+    border-radius: 999px;
+    font-weight: 600;
+}
+.host-tag {
+    font-size: .68rem;
+    color: var(--app-muted);
+    border: 1px solid var(--app-border);
+    border-radius: 6px;
+    padding: 0 .25rem;
+    flex: 0 0 auto;
+}
+
+/* Placeholder tokens that reveal a description on hover. */
+.app-ph { cursor: help; }
+
+/* Buttons get a gentle press and hover transition. */
+.btn {
+    transition: background-color var(--app-transition), border-color var(--app-transition),
+        color var(--app-transition), box-shadow var(--app-transition), transform var(--app-transition);
+}
+.btn:active { transform: translateY(1px); }
+
+/* Toasts */
+.toast {
+    border-radius: var(--app-radius);
+    box-shadow: var(--app-shadow-md);
+    overflow: hidden;
+}
+.toast-header { border-bottom: 1px solid var(--app-border); }
+
+/* Underline tabs, scoped to the pull-request page so the settings modal keeps
+ * Bootstrap's default tab styling. */
+#prTabs { border-bottom: 1px solid var(--app-border); gap: .15rem; }
+#prTabs .nav-link {
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    color: var(--app-muted);
+    padding: .5rem .9rem;
+    font-weight: 500;
+    transition: color var(--app-transition), border-color var(--app-transition);
+}
+#prTabs .nav-link:hover { color: var(--app-text); border-bottom-color: var(--app-border); }
+#prTabs .nav-link.active {
+    color: var(--app-text);
+    background: transparent;
+    border-bottom-color: var(--app-accent);
+    font-weight: 600;
+}
+#prTabs .badge { vertical-align: middle; }
+
+.theme-toggle {
+    line-height: 1;
+    font-size: .95rem;
+    padding: .2rem .5rem;
+}

@@ -1,0 +1,32 @@
+{# Reusable Bootstrap dialogs backing window.appAlert / window.appConfirm.
+   Included by the pages so we never fall back to native alert()/confirm(). #}
+<div class="modal fade" id="appConfirmModal" tabindex="-1" aria-labelledby="appConfirmTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="appConfirmTitle" data-dialog-title>Please confirm</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" data-dialog-body></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dialog-cancel data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" data-dialog-ok>Confirm</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="appAlertModal" tabindex="-1" aria-labelledby="appAlertTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="appAlertTitle" data-dialog-title>Notice</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" data-dialog-body></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" data-dialog-ok data-bs-dismiss="modal">OK</button>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ pr.repo }} #{{ pr.number }} - {{ pr.title }}</title>
+    <script>
+        // Apply the saved theme (default: system preference) before first paint.
+        (function () {
+            var theme = null;
+            try { theme = localStorage.getItem('pr-theme'); } catch (e) { /* ignore */ }
+            if (!theme) {
+                var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                theme = prefersDark ? 'dark' : 'light';
+            }
+            document.documentElement.setAttribute('data-bs-theme', theme);
+        })();
+    </script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='theme.css') }}" rel="stylesheet">
+    <style>
+        .pr-head { margin-bottom: 1rem; }
+        .pr-head h3 { font-weight: 650; letter-spacing: -.01em; }
+        .markdown-body { word-wrap: break-word; overflow-wrap: anywhere; }
+        .markdown-body img { max-width: 100%; }
+        .markdown-body pre { background: var(--app-surface-alt); padding: .75rem; border-radius: var(--app-radius-sm); overflow-x: auto; }
+        .markdown-body code {
+            background: var(--app-code-bg); padding: .1rem .3rem; border-radius: 4px; font-size: .875em;
+        }
+        .markdown-body pre code { background: none; padding: 0; }
+        .markdown-body blockquote {
+            border-left: 3px solid var(--app-border); padding-left: .75rem; color: var(--app-muted); margin: 0 0 1rem;
+        }
+        .markdown-empty { color: var(--app-muted); font-style: italic; }
+        .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--app-border); }
+        .avatar-sm { width: 22px; height: 22px; }
+        .meta-label {
+            color: var(--app-muted); font-size: .75rem; text-transform: uppercase;
+            font-weight: 600; letter-spacing: .03em;
+        }
+        .label-pill {
+            display: inline-block; font-size: .72rem; font-weight: 600;
+            border: 1px solid var(--app-border); border-radius: 999px; padding: .05rem .55rem;
+            margin: 0 .25rem .25rem 0; background: var(--app-surface); color: var(--app-muted);
+        }
+        .comment { border-bottom: 1px solid var(--app-border); }
+        .comment:last-child { border-bottom: 0; }
+        .comment-head {
+            display: flex; align-items: center; gap: .5rem;
+            padding: .5rem 1rem; background: var(--app-surface-alt); border-bottom: 1px solid var(--app-border);
+        }
+        .branch { font-family: var(--app-mono); font-size: .8rem; }
+        .diff-add { color: var(--app-add); font-weight: 600; }
+        .diff-del { color: var(--app-del); font-weight: 600; }
+        .state-open { background: #1f883d; }
+        #reviewOutput { min-height: 1rem; }
+
+        /* Commits */
+        .commit-row {
+            display: flex; align-items: flex-start; gap: .75rem;
+            padding: .6rem .25rem; border-bottom: 1px solid var(--app-border);
+        }
+        .commit-row:last-child { border-bottom: 0; }
+        .commit-msg { font-weight: 600; word-break: break-word; }
+        .commit-sha {
+            font-family: var(--app-mono); font-size: .78rem;
+            color: var(--app-muted);
+        }
+
+        /* Files changed / diffs */
+        .file-card {
+            border: 1px solid var(--app-border); border-radius: var(--app-radius-sm);
+            margin-bottom: .75rem; overflow: hidden;
+        }
+        .file-head {
+            display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+            padding: .5rem .75rem; background: var(--app-surface-alt);
+            cursor: pointer; user-select: none;
+            transition: background-color var(--app-transition);
+        }
+        .file-head:hover { background: var(--app-hover-bg); }
+        .file-name {
+            font-family: var(--app-mono); font-size: .82rem;
+            word-break: break-all;
+        }
+        .file-status {
+            font-size: .62rem; text-transform: uppercase; letter-spacing: .03em;
+            font-weight: 700; border: 1px solid var(--app-border); border-radius: 4px;
+            padding: 0 .3rem; color: var(--app-muted);
+        }
+        .file-status.added { color: var(--app-add); border-color: currentColor; }
+        .file-status.removed { color: var(--app-del); border-color: currentColor; }
+        .file-status.renamed { color: var(--app-accent); border-color: currentColor; }
+        .file-toggle { font-size: .78rem; }
+        .file-diff { overflow-x: auto; border-top: 1px solid var(--app-border); }
+        .file-diff.collapsed { display: none; }
+        .commit-body {
+            font-size: .78rem; color: var(--app-muted); white-space: pre-wrap;
+            background: transparent; padding: 0; margin: .25rem 0 0;
+        }
+
+        .diff-table {
+            width: 100%; border-collapse: collapse;
+            font-family: var(--app-mono);
+            font-size: .78rem; line-height: 1.45;
+        }
+        .diff-table td { padding: 0 .5rem; vertical-align: top; }
+        .diff-num {
+            width: 1%; min-width: 2.4rem; text-align: right; white-space: nowrap;
+            color: var(--app-muted); background: var(--app-surface-alt);
+            user-select: none;
+        }
+        .diff-code { white-space: pre; width: 50%; }
+        .diff-code.row-add, .diff-num.row-add { background: var(--diff-add-bg); }
+        .diff-code.row-del, .diff-num.row-del { background: var(--diff-del-bg); }
+        .diff-code.row-empty, .diff-num.row-empty { background: var(--diff-empty-bg); }
+        .diff-code.row-hunk { background: var(--diff-hunk-bg); color: var(--app-muted); }
+        .diff-num.diff-right { border-left: 1px solid var(--app-border); }
+        .diff-note { padding: .6rem .7rem; }
+    </style>
+</head>
+<body>
+    <nav class="navbar app-navbar px-3">
+        <div class="d-flex align-items-center gap-3">
+            <a href="/?repo={{ pr.slug | urlencode }}">&larr; Back to {{ pr.repo }}</a>
+            <span class="navbar-brand mb-0"><span class="app-brand-mark">PR</span>PR Reviewer</span>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <a class="btn btn-sm btn-outline-light" href="{{ pr.url }}" target="_blank" rel="noopener">
+                Open on {{ 'GitLab' if pr.provider == 'gitlab' else 'GitHub' }}
+            </a>
+            <button class="btn btn-sm btn-outline-light theme-toggle" id="themeToggle"
+                    onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode"></button>
+        </div>
+    </nav>
+
+    <div class="container-fluid p-4">
+        <div class="row g-4">
+            <!-- Main column -->
+            <div class="col-lg-9">
+                <div class="mb-3 pr-head">
+                    <h3 class="mb-1">
+                        {{ pr.title }}
+                        <span class="text-muted fw-normal">#{{ pr.number }}</span>
+                    </h3>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <span class="badge {% if pr.state == 'open' %}state-open{% else %}bg-secondary{% endif %}">
+                            {{ pr.state }}
+                        </span>
+                        {% if pr.draft %}<span class="badge bg-secondary">Draft</span>{% endif %}
+                        <span class="muted small">
+                            {{ pr.user or 'unknown' }} wants to merge
+                            <span class="branch">{{ pr.head_ref or '?' }}</span> into
+                            <span class="branch">{{ pr.base_ref or '?' }}</span>
+                        </span>
+                    </div>
+                </div>
+
+                <ul class="nav nav-tabs" id="prTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-conversation"
+                                type="button" role="tab">Conversation</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-commits"
+                                type="button" role="tab" onclick="loadCommits()">
+                            Commits <span class="badge app-count-badge" id="commitsCount">…</span>
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-files"
+                                type="button" role="tab" onclick="loadFiles()">
+                            Files changed <span class="badge app-count-badge" id="filesCount">…</span>
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content pt-3">
+                    <div class="tab-pane fade show active" id="tab-conversation" role="tabpanel">
+
+                <!-- AI review -->
+                <div class="panel mb-4" id="reviewPanel" data-pr-id="{{ pr.id }}"
+                     data-default-model="{{ settings.default_model }}">
+                    <div class="panel-header d-flex justify-content-between align-items-center">
+                        <span>AI Review</span>
+                        <span class="badge bg-secondary d-none" id="reviewBadge"></span>
+                    </div>
+                    <div class="panel-body">
+                        <div class="row g-2 align-items-end mb-3">
+                            <div class="col-sm-4">
+                                <label class="form-label small mb-1">Agent</label>
+                                <select id="reviewAgent" class="form-select form-select-sm">
+                                    {% for agent in agents %}
+                                    <option value="{{ agent.id }}"
+                                            {% if not agent.installed %}disabled{% endif %}
+                                            {% if settings.default_agent == agent.id %}selected{% endif %}>
+                                        {{ agent.label }}{% if not agent.installed %} (not installed){% endif %}
+                                    </option>
+                                    {% endfor %}
+                                    <option value="custom" {% if settings.default_agent == 'custom' %}selected{% endif %}>
+                                        Custom command
+                                    </option>
+                                </select>
+                            </div>
+                            <div class="col-sm-4">
+                                <label class="form-label small mb-1">Model <span class="muted">(optional)</span></label>
+                                <input id="reviewModel" class="form-control form-control-sm"
+                                       placeholder="provider/model" value="{{ settings.default_model }}">
+                            </div>
+                            <div class="col-sm-4">
+                                <button class="btn btn-sm btn-primary w-100" id="reviewRunBtn"
+                                        onclick="startReview()">Run review</button>
+                            </div>
+                        </div>
+
+                        <div id="reviewProgress" class="muted small mb-2">
+                            Clone and checkout happen in a local workspace before the agent runs.
+                        </div>
+                        <div id="reviewError" class="alert alert-danger py-2 d-none"></div>
+                        <div id="reviewOutput" class="markdown-body"></div>
+                        <div id="reviewMeta" class="muted small mt-2"></div>
+
+                        {% if reviews %}
+                        <hr>
+                        <label class="form-label small mb-1">History</label>
+                        <select id="reviewHistory" class="form-select form-select-sm" onchange="loadReview(this.value)">
+                            <option value="">Select a previous review…</option>
+                            {% for r in reviews %}
+                            <option value="{{ r.id }}">
+                                #{{ r.id }} · {{ r.agent }}{% if r.model %} ({{ r.model }}){% endif %} · {{ r.status }} · {{ (r.created_at or '')[:16].replace('T', ' ') }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Description -->
+                <div class="panel mb-4">
+                    <div class="panel-header">Description</div>
+                    <div class="panel-body">
+                        {% if pr.body %}
+                        <div class="markdown-body" id="prBody"></div>
+                        <script type="text/plain" id="prBodySource">{{ pr.body }}</script>
+                        {% else %}
+                        <p class="markdown-empty mb-0">No description provided.</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Comments -->
+                <div class="panel">
+                    <div class="panel-header">Comments ({{ pr.comments | length }})</div>
+                    {% if pr.comments %}
+                    <div>
+                        {% for comment in pr.comments %}
+                        <div class="comment">
+                            <div class="comment-head">
+                                <span class="avatar avatar-sm d-inline-flex align-items-center justify-content-center text-uppercase">
+                                    {{ (comment.user or '?')[:1] }}
+                                </span>
+                                <strong class="small">{{ comment.user or 'unknown' }}</strong>
+                                <span class="muted small">{{ (comment.created_at or '')[:16].replace('T', ' ') }}</span>
+                            </div>
+                            <div class="panel-body markdown-body comment-body"
+                                 data-source="{{ comment.body | e }}"></div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="panel-body">
+                        <p class="markdown-empty mb-0">No comments yet.</p>
+                    </div>
+                    {% endif %}
+                </div>
+                    </div><!-- /tab-conversation -->
+
+                    <!-- Commits -->
+                    <div class="tab-pane fade" id="tab-commits" role="tabpanel">
+                        <div class="panel">
+                            <div class="panel-header d-flex justify-content-between align-items-center">
+                                <span>Commits</span>
+                                <span class="muted small" id="commitsSummary"></span>
+                            </div>
+                            <div id="commitsBody" class="panel-body">
+                                <p class="markdown-empty mb-0">Open this tab to load commits.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Files changed -->
+                    <div class="tab-pane fade" id="tab-files" role="tabpanel">
+                        <div class="panel" id="filesPanel"
+                             data-changed-files="{{ pr.changed_files if pr.changed_files is not none else '' }}">
+                            <div class="panel-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <span id="filesSummary">Files changed</span>
+                                <div class="btn-group btn-group-sm" role="group" aria-label="Diff layout">
+                                    <button type="button" class="btn btn-outline-secondary active" id="diffUnifiedBtn"
+                                            onclick="setDiffMode('unified')">Unified</button>
+                                    <button type="button" class="btn btn-outline-secondary" id="diffSplitBtn"
+                                            onclick="setDiffMode('split')">Split</button>
+                                </div>
+                            </div>
+                            <div id="filesBody" class="panel-body">
+                                <p class="markdown-empty mb-0">Open this tab to load changes.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div><!-- /tab-content -->
+            </div>
+
+            <!-- Metadata column -->
+            <div class="col-lg-3">
+                <div class="panel">
+                    <div class="panel-header">Details</div>
+                    <div class="panel-body">
+                        <div class="d-flex align-items-center gap-2 mb-3">
+                            {% if pr.author_avatar %}
+                            <img class="avatar" src="{{ pr.author_avatar }}" alt="">
+                            {% else %}
+                            <span class="avatar d-inline-flex align-items-center justify-content-center text-uppercase">
+                                {{ (pr.user or '?')[:1] }}
+                            </span>
+                            {% endif %}
+                            <div>
+                                <div class="fw-semibold">{{ pr.user or 'unknown' }}</div>
+                                <div class="muted small">Author</div>
+                            </div>
+                        </div>
+
+                        <div class="mb-2">
+                            <div class="meta-label">Repository</div>
+                            <a href="/?repo={{ pr.slug | urlencode }}">{{ pr.repo }}</a>
+                            {% if pr.host != 'github.com' %}<span class="host-tag">{{ pr.host }}</span>{% endif %}
+                        </div>
+
+                        <div class="mb-2">
+                            <div class="meta-label">Branches</div>
+                            <span class="branch">{{ pr.head_ref or '?' }}</span>
+                            <span class="muted">&rarr;</span>
+                            <span class="branch">{{ pr.base_ref or '?' }}</span>
+                        </div>
+
+                        <div class="row mb-2">
+                            <div class="col-6">
+                                <div class="meta-label">Created</div>
+                                <div class="small">{{ (pr.created_at or '')[:10] }}</div>
+                            </div>
+                            <div class="col-6">
+                                <div class="meta-label">Updated</div>
+                                <div class="small">{{ (pr.updated_at or '')[:10] }}</div>
+                            </div>
+                        </div>
+
+                        {% if pr.changed_files is not none %}
+                        <div class="mb-2">
+                            <div class="meta-label">Changes</div>
+                            <div class="small">
+                                {{ pr.changed_files }} file(s)
+                                {% if pr.additions is not none %}
+                                <span class="diff-add">+{{ pr.additions }}</span>
+                                <span class="diff-del">-{{ pr.deletions }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <div class="mb-2">
+                            <div class="meta-label">Labels</div>
+                            {% if pr.labels %}
+                                {% for label in pr.labels %}
+                                <span class="label-pill">{{ label }}</span>
+                                {% endfor %}
+                            {% else %}
+                                <span class="muted small">None</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% include "_dialogs.html" %}
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='dialogs.js') }}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+    <script>
+        // ---- Theme (light/dark) ----
+        function themeIcon() {
+            const dark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+            document.getElementById('themeToggle').textContent = dark ? '☀️' : '🌙';
+        }
+
+        function toggleTheme() {
+            const next = document.documentElement.getAttribute('data-bs-theme') === 'dark'
+                ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-bs-theme', next);
+            try { localStorage.setItem('pr-theme', next); } catch (e) { /* ignore */ }
+            themeIcon();
+        }
+
+        themeIcon();
+        // Keep following the OS while the user has not picked a theme explicitly.
+        if (window.matchMedia) {
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+                let saved = null;
+                try { saved = localStorage.getItem('pr-theme'); } catch (err) { /* ignore */ }
+                if (!saved) {
+                    document.documentElement.setAttribute('data-bs-theme', e.matches ? 'dark' : 'light');
+                    themeIcon();
+                }
+            });
+        }
+
+        const PANEL = document.getElementById('reviewPanel');
+        const PR_ID = PANEL.dataset.prId;
+        let pollTimer = null;
+
+        function renderMarkdown(el, source) {
+            if (!el) return;
+            const text = source || '';
+            if (window.marked && window.DOMPurify) {
+                el.innerHTML = DOMPurify.sanitize(marked.parse(text));
+            } else {
+                el.textContent = text;
+            }
+        }
+
+        function setProgress(text, badge, badgeClass) {
+            document.getElementById('reviewProgress').textContent = text || '';
+            const b = document.getElementById('reviewBadge');
+            if (badge) {
+                b.textContent = badge;
+                b.className = 'badge ' + (badgeClass || 'bg-secondary');
+                b.classList.remove('d-none');
+            } else {
+                b.classList.add('d-none');
+            }
+        }
+
+        function setError(message) {
+            const el = document.getElementById('reviewError');
+            if (message) {
+                el.textContent = message;
+                el.classList.remove('d-none');
+            } else {
+                el.classList.add('d-none');
+                el.textContent = '';
+            }
+        }
+
+        async function startReview() {
+            const agent = document.getElementById('reviewAgent').value;
+            const model = document.getElementById('reviewModel').value.trim();
+            setError('');
+            document.getElementById('reviewOutput').innerHTML = '';
+            document.getElementById('reviewMeta').textContent = '';
+            document.getElementById('reviewRunBtn').disabled = true;
+            setProgress('Starting review…', 'starting', 'bg-secondary');
+            try {
+                const res = await fetch('/api/pr/' + PR_ID + '/review', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ agent: agent, model: model })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    setError(data.error || 'Could not start the review.');
+                    setProgress('');
+                    document.getElementById('reviewRunBtn').disabled = false;
+                    return;
+                }
+                pollReview(data.review.id);
+            } catch (err) {
+                setError('Request failed: ' + err);
+                setProgress('');
+                document.getElementById('reviewRunBtn').disabled = false;
+            }
+        }
+
+        function pollReview(id) {
+            clearInterval(pollTimer);
+            const tick = async () => {
+                try {
+                    const res = await fetch('/api/reviews/' + id);
+                    const review = await res.json();
+                    renderReview(review);
+                    if (review.status === 'done' || review.status === 'error') {
+                        clearInterval(pollTimer);
+                        document.getElementById('reviewRunBtn').disabled = false;
+                    }
+                } catch (err) {
+                    clearInterval(pollTimer);
+                    setError('Lost connection while polling the review.');
+                    document.getElementById('reviewRunBtn').disabled = false;
+                }
+            };
+            tick();
+            pollTimer = setInterval(tick, 2000);
+        }
+
+        function renderReview(review) {
+            const running = review.status === 'pending' || review.status === 'preparing' || review.status === 'running';
+            if (review.status === 'preparing') {
+                setProgress('Cloning / checking out the pull request…', 'preparing', 'bg-info text-dark');
+            } else if (review.status === 'running') {
+                setProgress('Running ' + review.agent + '… (this can take a while)', 'running', 'bg-warning text-dark');
+            } else if (review.status === 'done') {
+                setProgress('Review completed.', 'done', 'bg-success');
+            } else if (review.status === 'error') {
+                setProgress('Review failed.', 'error', 'bg-danger');
+            } else {
+                setProgress('Queued…', 'queued', 'bg-secondary');
+            }
+
+            renderMarkdown(document.getElementById('reviewOutput'), review.output);
+
+            let meta = [];
+            if (review.agent) meta.push('agent: ' + review.agent);
+            if (review.model) meta.push('model: ' + review.model);
+            if (review.duration_ms) meta.push('took ' + (review.duration_ms / 1000).toFixed(1) + 's');
+            if (review.command) meta.push('command: ' + review.command);
+            document.getElementById('reviewMeta').textContent = meta.join(' · ');
+
+            if (review.status === 'error') {
+                setError(review.error || 'The agent reported an error.');
+            } else {
+                setError('');
+            }
+        }
+
+        async function loadReview(id) {
+            if (!id) return;
+            const res = await fetch('/api/reviews/' + id);
+            const review = await res.json();
+            renderReview(review);
+            if (review.status === 'pending' || review.status === 'preparing' || review.status === 'running') {
+                document.getElementById('reviewRunBtn').disabled = true;
+                pollReview(id);
+            }
+        }
+
+        // ---- Commits ----
+        let commitsLoaded = false;
+
+        async function loadCommits() {
+            if (commitsLoaded) return;
+            commitsLoaded = true;
+            const body = document.getElementById('commitsBody');
+            body.innerHTML = '<p class="markdown-empty mb-0">Loading commits…</p>';
+            try {
+                const res = await fetch('/api/pr/' + PR_ID + '/commits');
+                const data = await res.json();
+                const commits = data.commits || [];
+                document.getElementById('commitsCount').textContent = commits.length;
+                document.getElementById('commitsSummary').textContent = commits.length + ' commit(s)';
+                renderCommits(commits);
+            } catch (err) {
+                commitsLoaded = false;
+                body.innerHTML = '<p class="markdown-empty mb-0">Could not load commits.</p>';
+            }
+        }
+
+        function renderCommits(commits) {
+            const body = document.getElementById('commitsBody');
+            if (!commits.length) {
+                body.innerHTML = '<p class="markdown-empty mb-0">No commits found.</p>';
+                return;
+            }
+            body.innerHTML = commits.map(renderCommitRow).join('');
+        }
+
+        function renderCommitRow(c) {
+            const who = c.author_login || c.author_name || '?';
+            const initial = escapeHtml(who.slice(0, 1).toUpperCase());
+            const avatar = c.author_avatar
+                ? '<img class="avatar avatar-sm" src="' + escapeHtml(c.author_avatar) + '" alt="">'
+                : '<span class="avatar avatar-sm d-inline-flex align-items-center justify-content-center text-uppercase">' + initial + '</span>';
+            const lines = (c.message || '').split('\n');
+            const title = escapeHtml(lines[0] || '');
+            const rest = lines.slice(1).join('\n').trim();
+            const msg = '<div class="commit-msg">' + title + '</div>'
+                + (rest ? '<pre class="commit-body">' + escapeHtml(rest) + '</pre>' : '');
+            const when = escapeHtml((c.date || '').slice(0, 16).replace('T', ' '));
+            const sha = c.url
+                ? '<a class="commit-sha" href="' + escapeHtml(c.url) + '" target="_blank" rel="noopener">'
+                    + escapeHtml(c.short_sha || '') + '</a>'
+                : '<span class="commit-sha">' + escapeHtml(c.short_sha || '') + '</span>';
+            return '<div class="commit-row">' + avatar
+                + '<div class="flex-grow-1">' + msg + '</div>'
+                + '<div class="text-end">' + sha + '<div class="muted small">'
+                    + escapeHtml(c.author_login || c.author_name || 'unknown') + ' · ' + when + '</div></div>'
+                + '</div>';
+        }
+
+        // ---- Files changed ----
+        const diffState = { loaded: false, mode: 'unified', files: [] };
+
+        async function loadFiles() {
+            if (diffState.loaded) return;
+            diffState.loaded = true;
+            const body = document.getElementById('filesBody');
+            body.innerHTML = '<p class="markdown-empty mb-0">Loading changes…</p>';
+            try {
+                const res = await fetch('/api/pr/' + PR_ID + '/files');
+                const data = await res.json();
+                diffState.files = (data.files || []).map(f =>
+                    Object.assign({}, f, { rows: parsePatch(f.patch) }));
+                renderFiles();
+            } catch (err) {
+                diffState.loaded = false;
+                body.innerHTML = '<p class="markdown-empty mb-0">Could not load changes.</p>';
+            }
+        }
+
+        function renderFiles() {
+            const files = diffState.files;
+            const body = document.getElementById('filesBody');
+            document.getElementById('filesCount').textContent = files.length;
+
+            const adds = files.reduce((n, f) => n + (f.additions || 0), 0);
+            const dels = files.reduce((n, f) => n + (f.deletions || 0), 0);
+            document.getElementById('filesSummary').innerHTML =
+                files.length + ' file' + (files.length === 1 ? '' : 's') + ' changed '
+                + '<span class="diff-add">+' + adds + '</span> '
+                + '<span class="diff-del">-' + dels + '</span>';
+
+            if (!files.length) {
+                body.innerHTML = '<p class="markdown-empty mb-0">No changes found.</p>';
+                return;
+            }
+            body.innerHTML = files.map(renderFileCard).join('');
+            body.querySelectorAll('.file-head').forEach(head => {
+                head.addEventListener('click', () => {
+                    const diff = head.parentElement.querySelector('.file-diff');
+                    const btn = head.querySelector('.file-toggle');
+                    const collapsed = diff.classList.toggle('collapsed');
+                    if (btn) btn.textContent = collapsed ? 'Show diff' : 'Hide diff';
+                });
+            });
+        }
+
+        function renderFileCard(f, index) {
+            const prev = f.previous_filename && f.previous_filename !== f.filename
+                ? ' <span class="muted small">(from ' + escapeHtml(f.previous_filename) + ')</span>' : '';
+            const lineCount = (f.patch || '').split('\n').length;
+            const big = lineCount > 700;
+            const diffHtml = f.patch
+                ? renderDiff(f.rows)
+                : '<div class="diff-note muted small">Diff not available (binary or too large).</div>';
+            return '<div class="file-card">'
+                + '<div class="file-head">'
+                + '<span class="file-status ' + escapeHtml(f.status || '') + '">'
+                    + escapeHtml(f.status || 'changed') + '</span>'
+                + '<span class="file-name">' + escapeHtml(f.filename || '') + '</span>' + prev
+                + '<span class="diff-stat ms-auto"><span class="diff-add">+' + (f.additions || 0)
+                    + '</span> <span class="diff-del">-' + (f.deletions || 0) + '</span></span>'
+                + '<span class="file-toggle muted">' + (big ? 'Show diff' : 'Hide diff') + '</span>'
+                + '</div>'
+                + '<div class="file-diff' + (big ? ' collapsed' : '') + '" data-index="' + index + '">'
+                    + diffHtml + '</div>'
+                + '</div>';
+        }
+
+        function setDiffMode(mode) {
+            if (diffState.mode === mode) return;
+            diffState.mode = mode;
+            document.getElementById('diffUnifiedBtn').classList.toggle('active', mode === 'unified');
+            document.getElementById('diffSplitBtn').classList.toggle('active', mode === 'split');
+            document.querySelectorAll('#filesBody .file-diff').forEach(el => {
+                const f = diffState.files[Number(el.dataset.index)];
+                if (!f) return;
+                el.innerHTML = f.patch
+                    ? renderDiff(f.rows)
+                    : '<div class="diff-note muted small">Diff not available (binary or too large).</div>';
+            });
+        }
+
+        // ---- Diff parsing and rendering (unified + split) ----
+        function escapeHtml(value) {
+            return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[ch]));
+        }
+
+        function parsePatch(patch) {
+            const rows = [];
+            if (!patch) return rows;
+            const lines = patch.split('\n');
+            let oldNo = 0;
+            let newNo = 0;
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                if (i === lines.length - 1 && line === '') break; // trailing newline
+                if (i < 2 && (line.startsWith('--- ') || line.startsWith('+++ '))) continue; // file header
+                const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+                if (hunk) {
+                    oldNo = parseInt(hunk[1], 10);
+                    newNo = parseInt(hunk[2], 10);
+                    rows.push({ type: 'hunk', text: line });
+                    continue;
+                }
+                if (line.charAt(0) === '\\') continue; // "\ No newline at end of file"
+                const tag = line.charAt(0);
+                const text = line.slice(1);
+                if (tag === '+') {
+                    rows.push({ type: 'add', text: text, oldNo: null, newNo: newNo++ });
+                } else if (tag === '-') {
+                    rows.push({ type: 'del', text: text, oldNo: oldNo++, newNo: null });
+                } else {
+                    rows.push({ type: 'ctx', text: text, oldNo: oldNo++, newNo: newNo++ });
+                }
+            }
+            return rows;
+        }
+
+        function renderDiff(rows) {
+            return diffState.mode === 'split' ? renderDiffSplit(rows) : renderDiffUnified(rows);
+        }
+
+        function renderDiffUnified(rows) {
+            let html = '<table class="diff-table"><tbody>';
+            for (const r of rows) {
+                if (r.type === 'hunk') {
+                    html += '<tr><td class="diff-num"></td><td class="diff-num"></td>'
+                        + '<td class="diff-code row-hunk">' + escapeHtml(r.text) + '</td></tr>';
+                    continue;
+                }
+                const cls = r.type === 'add' ? 'row-add' : r.type === 'del' ? 'row-del' : 'row-ctx';
+                const sign = r.type === 'add' ? '+' : r.type === 'del' ? '-' : ' ';
+                const o = r.oldNo == null ? '' : r.oldNo;
+                const n = r.newNo == null ? '' : r.newNo;
+                html += '<tr>'
+                    + '<td class="diff-num ' + cls + '">' + o + '</td>'
+                    + '<td class="diff-num ' + cls + '">' + n + '</td>'
+                    + '<td class="diff-code ' + cls + '">' + escapeHtml(sign + r.text) + '</td>'
+                    + '</tr>';
+            }
+            return html + '</tbody></table>';
+        }
+
+        function renderDiffSplit(rows) {
+            const pairs = [];
+            let i = 0;
+            while (i < rows.length) {
+                const r = rows[i];
+                if (r.type === 'hunk') {
+                    pairs.push({ kind: 'hunk', text: r.text });
+                    i += 1;
+                    continue;
+                }
+                if (r.type === 'ctx') {
+                    pairs.push({ kind: 'ctx', left: r, right: r });
+                    i += 1;
+                    continue;
+                }
+                const dels = [];
+                while (i < rows.length && rows[i].type === 'del') { dels.push(rows[i]); i += 1; }
+                const adds = [];
+                while (i < rows.length && rows[i].type === 'add') { adds.push(rows[i]); i += 1; }
+                const count = Math.max(dels.length, adds.length);
+                for (let k = 0; k < count; k += 1) {
+                    pairs.push({ kind: 'chg', left: dels[k] || null, right: adds[k] || null });
+                }
+            }
+
+            let html = '<table class="diff-table diff-split"><tbody>';
+            for (const pair of pairs) {
+                if (pair.kind === 'hunk') {
+                    html += '<tr><td class="diff-num"></td><td class="diff-code row-hunk" colspan="3">'
+                        + escapeHtml(pair.text) + '</td></tr>';
+                    continue;
+                }
+                if (pair.kind === 'ctx') {
+                    html += splitRowHtml(pair.left.oldNo, ' ' + pair.left.text, 'row-ctx',
+                                         pair.right.newNo, ' ' + pair.right.text, 'row-ctx');
+                    continue;
+                }
+                const left = pair.left;
+                const right = pair.right;
+                html += splitRowHtml(
+                    left ? left.oldNo : null, left ? '-' + left.text : '', left ? 'row-del' : 'row-empty',
+                    right ? right.newNo : null, right ? '+' + right.text : '', right ? 'row-add' : 'row-empty'
+                );
+            }
+            return html + '</tbody></table>';
+        }
+
+        function splitRowHtml(leftNo, leftText, leftCls, rightNo, rightText, rightCls) {
+            return '<tr>'
+                + '<td class="diff-num ' + leftCls + '">' + (leftNo == null ? '' : leftNo) + '</td>'
+                + '<td class="diff-code ' + leftCls + '">' + escapeHtml(leftText) + '</td>'
+                + '<td class="diff-num diff-right ' + rightCls + '">' + (rightNo == null ? '' : rightNo) + '</td>'
+                + '<td class="diff-code ' + rightCls + '">' + escapeHtml(rightText) + '</td>'
+                + '</tr>';
+        }
+
+        // Markdown for the description and comments.
+        const bodySource = document.getElementById('prBodySource');
+        if (bodySource) {
+            renderMarkdown(document.getElementById('prBody'), bodySource.textContent);
+        }
+        document.querySelectorAll('.comment-body').forEach(el => {
+            renderMarkdown(el, el.dataset.source);
+        });
+
+        // Show the most recent review, if any.
+        {% if reviews %}
+        loadReview({{ reviews[0].id }});
+        {% endif %}
+    </script>
+</body>
+</html>

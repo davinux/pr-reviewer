@@ -1,0 +1,1150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PR Reviewer{% if selected %} - {{ selected.full_name }}{% endif %}</title>
+    <script>
+        // Apply the saved theme (default: system preference) and sidebar width
+        // before first paint.
+        (function () {
+            var theme = null;
+            try { theme = localStorage.getItem('pr-theme'); } catch (e) { /* ignore */ }
+            if (!theme) {
+                var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                theme = prefersDark ? 'dark' : 'light';
+            }
+            document.documentElement.setAttribute('data-bs-theme', theme);
+            try {
+                var width = parseInt(localStorage.getItem('pr-sidebar-width'), 10);
+                if (width > 0) {
+                    document.documentElement.style.setProperty('--sidebar-width', width + 'px');
+                }
+            } catch (e) { /* ignore */ }
+        })();
+    </script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='theme.css') }}" rel="stylesheet">
+    <style>
+        :root { --sidebar-width: 300px; }
+        .layout { display: flex; align-items: flex-start; min-height: calc(100vh - 56px); }
+        .sidebar {
+            width: var(--sidebar-width); flex: 0 0 var(--sidebar-width);
+            background: var(--app-surface);
+            border-right: 1px solid var(--app-border);
+            padding: 1.25rem 1rem;
+            position: sticky; top: 56px; align-self: flex-start;
+            height: calc(100vh - 56px); overflow-y: auto; overflow-x: hidden;
+        }
+        .content { flex: 1 1 auto; min-width: 0; padding: 1.5rem 1.75rem; }
+        .sidebar-resizer {
+            flex: 0 0 7px; margin-left: -3px;
+            align-self: flex-start; position: sticky; top: 56px;
+            height: calc(100vh - 56px); z-index: 5;
+            cursor: col-resize; touch-action: none;
+        }
+        .sidebar-resizer::after {
+            content: ''; position: absolute; top: 0; bottom: 0; left: 50%;
+            width: 2px; transform: translateX(-50%); border-radius: 2px;
+            background: transparent; transition: background-color var(--app-transition);
+        }
+        .sidebar-resizer:hover::after,
+        .sidebar-resizer.dragging::after,
+        .sidebar-resizer:focus-visible::after { background: var(--app-accent); }
+        .sidebar-resizer:focus-visible { outline: none; }
+        .page-title { font-weight: 650; letter-spacing: -.01em; }
+        .sidebar-label {
+            text-transform: uppercase; letter-spacing: .06em; font-size: .68rem;
+            font-weight: 700; color: var(--app-muted); margin: 1rem 0 .4rem;
+        }
+        .repo-item {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: .25rem; border-radius: var(--app-radius-sm); min-width: 0;
+            transition: background-color var(--app-transition);
+        }
+        .repo-item.active { background: var(--app-active-bg); }
+        .repo-item.active .repo-link { color: var(--app-accent); font-weight: 600; }
+        .repo-link {
+            display: flex; align-items: center; justify-content: space-between;
+            flex: 1 1 auto; gap: .5rem; padding: .45rem .55rem;
+            color: var(--app-text); text-decoration: none;
+            border-radius: var(--app-radius-sm); overflow: hidden;
+            transition: background-color var(--app-transition);
+        }
+        .repo-link:hover { background: var(--app-hover-bg); }
+        .repo-link .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .repo-remove {
+            border: 0; background: transparent; color: var(--app-icon); line-height: 1;
+            font-size: 1.1rem; padding: 0 .35rem; border-radius: var(--app-radius-sm);
+            cursor: pointer; transition: color var(--app-transition), background-color var(--app-transition);
+        }
+        .repo-remove:hover { color: var(--app-danger); background: var(--app-danger-bg); }
+        .repo-watch {
+            border: 0; background: transparent; line-height: 1; font-size: .9rem;
+            padding: 0 .3rem; border-radius: var(--app-radius-sm); cursor: pointer;
+            opacity: .35; filter: grayscale(1);
+            transition: opacity var(--app-transition), background-color var(--app-transition);
+        }
+        .repo-watch:hover { background: var(--app-hover-bg); opacity: 1; }
+        .repo-watch.active { opacity: 1; filter: none; }
+        .count-badge {
+            background: var(--app-badge-bg); color: var(--app-badge-fg); font-size: .72rem;
+            font-weight: 600; border-radius: 999px; padding: .05rem .5rem;
+            min-width: 1.6rem; text-align: center; flex: 0 0 auto;
+        }
+        .pr-title { font-weight: 600; color: var(--app-accent); text-decoration: none; }
+        .pr-title:hover { text-decoration: underline; }
+        .avatar {
+            width: 20px; height: 20px; border-radius: 50%; vertical-align: middle;
+            margin-right: .35rem; background: var(--app-border);
+        }
+        .label-pill {
+            display: inline-block; font-size: .7rem; font-weight: 600;
+            border: 1px solid var(--app-border); border-radius: 999px; padding: 0 .5rem;
+            margin: 0 .2rem .1rem 0; background: var(--app-surface); color: var(--app-muted);
+        }
+        .empty-state { text-align: center; color: var(--app-muted); padding: 3.5rem 1rem; }
+        .empty-state .empty-icon { font-size: 2rem; opacity: .45; line-height: 1; }
+        .diff-stat { font-size: .8rem; font-family: var(--app-mono); }
+        .diff-add { color: var(--app-add); }
+        .diff-del { color: var(--app-del); }
+        table.prs td, table.prs th { vertical-align: middle; }
+
+        /* AI Reviewed list */
+        .reviewed-item {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: .25rem; border-radius: var(--app-radius-sm);
+            min-width: 0; overflow: hidden;
+            transition: background-color var(--app-transition);
+        }
+        .reviewed-link {
+            display: flex; align-items: center; gap: .5rem;
+            flex: 1 1 auto; min-width: 0; padding: .4rem .5rem;
+            color: var(--app-text); text-decoration: none;
+            border-radius: var(--app-radius-sm); overflow: hidden;
+            transition: background-color var(--app-transition);
+        }
+        .reviewed-link:hover { background: var(--app-hover-bg); }
+        .reviewed-main { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+        .reviewed-title, .reviewed-sub {
+            display: block; min-width: 0;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .reviewed-title { font-size: .82rem; }
+        .reviewed-sub { font-size: .7rem; }
+        .reviewed-remove { flex: 0 0 auto; }
+        .reviewed-dot {
+            width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+            background: var(--app-icon);
+        }
+        .reviewed-dot.status-preparing { background: var(--app-accent); }
+        .reviewed-dot.status-running { background: #d29922; }
+        .reviewed-dot.status-done { background: var(--app-add); }
+        .reviewed-dot.status-error { background: var(--app-del); }
+        .reviewed-dot.status-running, .reviewed-dot.status-preparing {
+            animation: reviewed-pulse 1.4s ease-in-out infinite;
+        }
+        @keyframes reviewed-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
+        @media (max-width: 767.98px) {
+            .layout { flex-direction: column; }
+            .sidebar {
+                width: 100%; flex-basis: auto; position: static; height: auto;
+                border-right: 0; border-bottom: 1px solid var(--app-border);
+            }
+            .sidebar-resizer { display: none; }
+            .content { padding: 1rem; }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar app-navbar px-3">
+        <span class="navbar-brand mb-0"><span class="app-brand-mark">PR</span>PR Reviewer</span>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-secondary" id="totalBadge">Total: {{ total_prs }}</span>
+            <button class="btn btn-sm btn-light" id="syncBtn" onclick="syncNow()">
+                <span class="spinner-border spinner-border-sm d-none" id="syncSpinner"></span>
+                Sync PRs
+            </button>
+            <button class="btn btn-sm btn-outline-light" data-bs-toggle="modal" data-bs-target="#settingsModal">
+                Settings
+            </button>
+            <button class="btn btn-sm btn-outline-light theme-toggle" id="themeToggle"
+                    onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode"></button>
+        </div>
+    </nav>
+
+    <div class="layout">
+        <!-- Sidebar: repository selector -->
+        <aside class="sidebar">
+            <form onsubmit="addRepo(event)" class="mb-3">
+                <div class="input-group input-group-sm">
+                    <select id="providerInput" class="form-select" style="max-width: 105px;">
+                        <option value="github">GitHub</option>
+                        <option value="gitlab">GitLab</option>
+                    </select>
+                    <input type="text" id="repoInput" class="form-control" placeholder="owner/repo">
+                    <button class="btn btn-primary" type="submit">Add</button>
+                </div>
+                <div class="form-text">Tip: you can also paste a full repo URL.</div>
+            </form>
+
+            <div class="d-grid">
+                <a class="repo-item repo-link {% if not selected %}active{% endif %}"
+                   href="/" style="padding:.4rem .5rem;">
+                    <span class="name">All repositories</span>
+                    <span class="count-badge">{{ total_prs }}</span>
+                </a>
+            </div>
+
+            <div class="sidebar-label">Repositories</div>
+
+            {% if repos %}
+            <div class="d-grid gap-1" id="repoList">
+                {% for repo in repos %}
+                <div class="repo-item {% if selected and selected.slug == repo.slug %}active{% endif %}">
+                    <a class="repo-link" href="/?repo={{ repo.slug | urlencode }}"
+                       title="{{ repo.slug }}">
+                        <span class="name">{{ repo.full_name }}</span>
+                        {% if repo.host != 'github.com' %}
+                        <span class="host-tag">{{ repo.host }}</span>
+                        {% endif %}
+                        <span class="count-badge">{{ repo.count }}</span>
+                    </a>
+                    <button class="repo-watch {% if repo.watch %}active{% endif %}"
+                            title="{{ 'Watching for new PRs — click to stop' if repo.watch else 'Watch this repo for new PRs' }}"
+                            onclick="toggleWatch('{{ repo.slug }}', {{ 'false' if repo.watch else 'true' }})">
+                        {{ '🔔' if repo.watch else '🔕' }}
+                    </button>
+                    <button class="repo-remove" title="Remove repository"
+                            onclick="removeRepo('{{ repo.slug }}')">&times;</button>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="muted small">No repositories yet. Add one above, then <strong>Sync PRs</strong>.</p>
+            {% endif %}
+
+            <div class="sidebar-label d-flex align-items-center justify-content-between">
+                <span>AI Reviewed</span>
+                <span class="count-badge" id="reviewedCount">{{ reviewed | length }}</span>
+            </div>
+            <div class="d-grid gap-1" id="reviewedList">
+                {% for item in reviewed %}
+                <div class="reviewed-item" data-pr-id="{{ item.pr_id }}">
+                    <a class="reviewed-link" href="/pr/{{ item.pr_id }}"
+                       title="{{ item.full_name }} #{{ item.number }} — {{ item.title }}">
+                        <span class="reviewed-dot status-{{ item.status or 'pending' }}"></span>
+                        <span class="reviewed-main">
+                            <span class="reviewed-title">#{{ item.number }} {{ item.title }}</span>
+                            <span class="reviewed-sub muted">{{ item.full_name }} · {{ item.status_label }}</span>
+                        </span>
+                    </a>
+                    <button type="button" class="repo-remove reviewed-remove"
+                            title="Remove from AI Reviewed list">&times;</button>
+                </div>
+                {% endfor %}
+            </div>
+            <p class="muted small {% if reviewed %}d-none{% endif %}" id="reviewedEmpty">
+                Reviewed pull requests show up here. Run an agent review to track one.
+            </p>
+
+            <hr>
+            <div class="sidebar-label mb-1">Agents</div>
+            {% for agent in agents %}
+            <div class="small d-flex align-items-center gap-2">
+                <span class="{% if agent.installed %}text-success{% else %}text-muted{% endif %}">&#9679;</span>
+                <span class="{{ '' if agent.installed else 'muted' }}">{{ agent.label }}</span>
+                {% if not agent.installed %}<span class="muted">(not installed)</span>{% endif %}
+            </div>
+            {% endfor %}
+        </aside>
+
+        <div class="sidebar-resizer" id="sidebarResizer" role="separator"
+             aria-orientation="vertical" aria-label="Resize sidebar" tabindex="0"
+             title="Drag to resize · double-click to reset"></div>
+
+        <!-- Content: pull request queue -->
+        <main class="content" id="content" data-repo="{{ selected_slug or '' }}">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div>
+                    <h4 class="mb-0 page-title">
+                        {% if selected %}{{ selected.full_name }}{% else %}All repositories{% endif %}
+                        {% if selected and selected.host != 'github.com' %}
+                        <span class="host-tag">{{ selected.host }}</span>
+                        {% endif %}
+                    </h4>
+                    <span class="muted small">
+                        <span id="repoCount">{{ repo_total }}</span> open pull request(s)
+                    </span>
+                </div>
+            </div>
+
+            {% if pr_data %}
+            <div class="card">
+                <div class="table-responsive">
+                    <table class="table table-hover prs mb-0">
+                        <thead class="app-thead">
+                            <tr>
+                                <th style="width:70px;">#</th>
+                                <th>Title</th>
+                                {% if not selected %}<th>Repository</th>{% endif %}
+                                <th>Author</th>
+                                <th>Labels</th>
+                                <th style="width:90px;">Comments</th>
+                                <th style="width:130px;">Updated</th>
+                            </tr>
+                        </thead>
+                        <tbody id="prTableBody">
+                            {% for pr in pr_data %}
+                            <tr>
+                                <td class="muted">
+                                    <a href="/pr/{{ pr.id }}" class="text-decoration-none">{{ pr.number }}</a>
+                                </td>
+                                <td>
+                                    <a class="pr-title" href="/pr/{{ pr.id }}">{{ pr.title }}</a>
+                                    {% if pr.draft %}<span class="badge bg-secondary ms-1">Draft</span>{% endif %}
+                                    {% if pr.additions is not none and pr.deletions is not none %}
+                                    <span class="diff-stat ms-2">
+                                        <span class="diff-add">+{{ pr.additions }}</span>
+                                        <span class="diff-del">-{{ pr.deletions }}</span>
+                                    </span>
+                                    {% endif %}
+                                </td>
+                                {% if not selected %}
+                                <td>
+                                    <span class="muted small">{{ pr.repo }}</span>
+                                    {% if pr.host != 'github.com' %}
+                                    <span class="host-tag">{{ pr.host }}</span>
+                                    {% endif %}
+                                </td>
+                                {% endif %}
+                                <td>
+                                    {% if pr.author_avatar %}
+                                    <img class="avatar" src="{{ pr.author_avatar }}" alt="">
+                                    {% endif %}
+                                    <span class="small">{{ pr.user or '' }}</span>
+                                </td>
+                                <td>
+                                    {% for label in pr.labels %}
+                                    <span class="label-pill">{{ label }}</span>
+                                    {% endfor %}
+                                </td>
+                                <td>
+                                    <span class="badge app-count-badge">
+                                        {{ pr.comments | length }}
+                                    </span>
+                                </td>
+                                <td class="muted small">{{ (pr.updated_at or '')[:10] }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div class="empty-icon">&#128269;</div>
+                <h5 class="mt-2">No pull requests yet</h5>
+                <p>
+                    {% if repos %}
+                    Nothing stored for this selection. Click <strong>Sync PRs</strong> to fetch
+                    open requests.
+                    {% else %}
+                    Add a GitHub or GitLab repository, then click <strong>Sync PRs</strong>.
+                    {% endif %}
+                </p>
+            </div>
+            {% endif %}
+        </main>
+    </div>
+
+    <!-- Settings modal -->
+    <div class="modal fade" id="settingsModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Settings</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <ul class="nav nav-tabs mb-3" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-providers" type="button">Providers</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-agents" type="button">Agents</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-prompt" type="button">Prompt</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-limits" type="button">Limits</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-server" type="button">Server</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-watching" type="button">Watching</button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content">
+                        <!-- Providers -->
+                        <div class="tab-pane fade show active" id="tab-providers">
+                            <h6>GitHub</h6>
+                            <div class="mb-3">
+                                <label class="form-label">Token</label>
+                                <input type="password" id="githubTokenInput" class="form-control"
+                                       placeholder="{{ '•••••••• (saved)' if settings.github_token else 'ghp_...' }}">
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">GitHub URL</label>
+                                    <input type="text" id="githubUrlInput" class="form-control"
+                                           value="{{ settings.github_url }}" placeholder="https://github.com">
+                                    <div class="form-text">Web/clone base. Set your GitHub Enterprise URL if self-hosted.</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">GitHub API URL <span class="muted">(optional)</span></label>
+                                    <input type="text" id="githubApiInput" class="form-control"
+                                           value="{{ settings.github_api_url }}" placeholder="https://api.github.com">
+                                    <div class="form-text">Leave empty to derive it from the URL above.</div>
+                                </div>
+                            </div>
+                            <hr>
+                            <h6>GitLab</h6>
+                            <div class="mb-3">
+                                <label class="form-label">Token</label>
+                                <input type="password" id="gitlabTokenInput" class="form-control"
+                                       placeholder="{{ '•••••••• (saved)' if settings.gitlab_token else 'glpat-...' }}">
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">GitLab URL</label>
+                                    <input type="text" id="gitlabUrlInput" class="form-control"
+                                           value="{{ settings.gitlab_url }}" placeholder="https://gitlab.com">
+                                    <div class="form-text">Default host for GitLab repos added as <code>owner/repo</code>.</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">GitLab API URL <span class="muted">(optional)</span></label>
+                                    <input type="text" id="gitlabApiInput" class="form-control"
+                                           value="{{ settings.gitlab_api_url }}" placeholder="https://gitlab.com/api/v4">
+                                    <div class="form-text">Leave empty to use <code>&lt;host&gt;/api/v4</code>.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Agents -->
+                        <div class="tab-pane fade" id="tab-agents">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Default agent</label>
+                                    <select id="agentInput" class="form-select">
+                                        <option value="">Auto (first installed)</option>
+                                        {% for agent in agents %}
+                                        <option value="{{ agent.id }}" {% if settings.default_agent == agent.id %}selected{% endif %}>
+                                            {{ agent.label }}{% if not agent.installed %} (not installed){% endif %}
+                                        </option>
+                                        {% endfor %}
+                                        <option value="custom" {% if settings.default_agent == 'custom' %}selected{% endif %}>
+                                            Custom command
+                                        </option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Default model <span class="muted">(optional)</span></label>
+                                    <input type="text" id="modelInput" class="form-control" list="modelOptions"
+                                           placeholder="provider/model" value="{{ settings.default_model }}">
+                                    <datalist id="modelOptions"></datalist>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Custom agent command</label>
+                                <input type="text" id="customInput" class="form-control"
+                                       placeholder="myagent --prompt {prompt}" value="{{ settings.custom_command }}">
+                                <div class="form-text">
+                                    Placeholders: <code>{prompt}</code>, <code>{model}</code>.
+                                    Runs in the checkout directory.
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Custom model command <span class="muted">(optional)</span></label>
+                                <input type="text" id="customModelInput" class="form-control agent-model-command"
+                                       data-agent="custom" placeholder="myagent --list-models"
+                                       value="{{ settings.agent_model_commands.get('custom', '') }}">
+                                <div class="form-text">
+                                    A command that prints the available models, one <code>provider/model</code> per line.
+                                </div>
+                            </div>
+                            <hr>
+                            <h6>Command templates, binaries &amp; models</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm align-middle mb-1">
+                                    <thead class="app-thead">
+                                        <tr>
+                                            <th style="width:16%;">Agent</th>
+                                            <th>Command template</th>
+                                            <th style="width:18%;">Binary</th>
+                                            <th style="width:18%;">Model command</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for agent in agents %}
+                                        <tr>
+                                            <td>
+                                                {{ agent.label }}
+                                                <div>
+                                                    <span class="badge {% if agent.installed %}bg-success{% else %}bg-secondary{% endif %}">
+                                                        {{ 'installed' if agent.installed else 'not found' }}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <input class="form-control form-control-sm agent-command"
+                                                       data-agent="{{ agent.id }}"
+                                                       value="{{ settings.agent_commands.get(agent.id, '') }}"
+                                                       placeholder="{{ agent.default_command }}">
+                                            </td>
+                                            <td>
+                                                <input class="form-control form-control-sm agent-binary"
+                                                       data-agent="{{ agent.id }}"
+                                                       value="{{ settings.agent_binaries.get(agent.id, '') }}"
+                                                       placeholder="{{ agent.default_binaries | join(' / ') }}">
+                                            </td>
+                                            <td>
+                                                <input class="form-control form-control-sm agent-model-command"
+                                                       data-agent="{{ agent.id }}"
+                                                       value="{{ settings.agent_model_commands.get(agent.id, '') }}"
+                                                       placeholder="{{ agent.default_model_command or '—' }}">
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="form-text">
+                                Leave a field empty to use the built-in default (shown as the placeholder).
+                                Use <code>[--model {model}]</code> so the flag is dropped when no model is set.
+                            </div>
+                            <hr>
+                            <h6>Available models</h6>
+                            <div class="row g-2 align-items-end mb-2">
+                                <div class="col-sm-6">
+                                    <label class="form-label small mb-1">Agent</label>
+                                    <select id="modelsAgent" class="form-select form-select-sm"
+                                            onchange="loadModels(false)">
+                                        {% for agent in agents %}
+                                        <option value="{{ agent.id }}" {% if settings.default_agent == agent.id %}selected{% endif %}>
+                                            {{ agent.label }}{% if not agent.installed %} (not installed){% endif %}
+                                        </option>
+                                        {% endfor %}
+                                        <option value="custom" {% if settings.default_agent == 'custom' %}selected{% endif %}>
+                                            Custom command
+                                        </option>
+                                    </select>
+                                </div>
+                                <div class="col-sm-6">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary w-100"
+                                            onclick="loadModels(true)">Refresh models</button>
+                                </div>
+                            </div>
+                            <div id="modelsStatus" class="muted small mb-1"></div>
+                            <div id="modelList" class="d-flex flex-wrap gap-1"></div>
+                            <div class="form-text mt-1">Click a model to use it as the default model.</div>
+                        </div>
+
+                        <!-- Prompt -->
+                        <div class="tab-pane fade" id="tab-prompt">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <label class="form-label mb-0">Review prompt template</label>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="resetPrompt()">
+                                    Restore default
+                                </button>
+                            </div>
+                            <textarea id="promptInput" class="form-control font-monospace" rows="16"
+                                      spellcheck="false">{{ settings.review_prompt }}</textarea>
+                            <div class="form-text">
+                                Placeholders (hover one for a description):
+                                <ul class="list-unstyled d-flex flex-wrap gap-2 mt-1 mb-0">
+                                    <li><code class="app-ph" data-bs-toggle="tooltip"
+                                              data-bs-title="The kind of request: a pull request or a merge request, depending on the provider.">{kind}</code></li>
+                                    <li><code class="app-ph" data-bs-toggle="tooltip"
+                                              data-bs-title="The same as {kind} but capitalised, e.g. Pull request; handy in headings.">{kind_title}</code></li>
+                                    <li><code class="app-ph" data-bs-toggle="tooltip"
+                                              data-bs-title="The hosting provider: github or gitlab.">{provider}</code></li>
+                                    <li><code class="app-ph" data-bs-toggle="tooltip"
+                                              data-bs-title="The host the repository lives on, e.g. github.com or your self-hosted GitLab host.">{host}</code></li>
+                                    <li><code class="app-ph" data-bs-toggle="tooltip"
+                                              data-bs-title="The repository as owner/repo.">{repo}</code></li>
+                                    <li><code class="app-ph" data-bs-toggle="tooltip"
+                                              data-bs-title="The pull or merge request number.">{number}</code></li>
+                                    <li><code class="app-ph" data-bs-toggle="tooltip"
+                                              data-bs-title="The title of the request.">{title}</code></li>
+                                    <li><code class="app-ph" data-bs-toggle="tooltip"
+                                              data-bs-title="The username that opened the request.">{author}</code></li>
+                                    <li><code class="app-ph" data-bs-toggle="tooltip"
+                                              data-bs-title="Alias of {author}.">{user}</code></li>
+                                    <li><code class="app-ph" data-bs-toggle="tooltip"
+                                              data-bs-title="The web URL of the request.">{url}</code></li>
+                                    <li><code class="app-ph" data-bs-toggle="tooltip"
+                                              data-bs-title="The branch the request targets (its base).">{base_ref}</code></li>
+                                    <li><code class="app-ph" data-bs-toggle="tooltip"
+                                              data-bs-title="The branch the request comes from (its head).">{head_ref}</code></li>
+                                    <li><code class="app-ph" data-bs-toggle="tooltip"
+                                              data-bs-title="The request description, truncated to Max description characters.">{body}</code></li>
+                                    <li><code class="app-ph" data-bs-toggle="tooltip"
+                                              data-bs-title="A ready-to-run command, git diff origin/&lt;base&gt;...HEAD, that shows the changes.">{diff_command}</code></li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <!-- Limits -->
+                        <div class="tab-pane fade" id="tab-limits">
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Review timeout (seconds)</label>
+                                    <input type="number" min="1" id="timeoutInput" class="form-control"
+                                           value="{{ settings.review_timeout }}">
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Max prompt characters</label>
+                                    <input type="number" min="1000" id="maxPromptInput" class="form-control"
+                                           value="{{ settings.max_prompt_chars }}">
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Max description characters</label>
+                                    <input type="number" min="0" id="maxDescInput" class="form-control"
+                                           value="{{ settings.max_description_chars }}">
+                                    <div class="form-text">0 = no truncation.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Server -->
+                        <div class="tab-pane fade" id="tab-server">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Bind host</label>
+                                    <input type="text" id="hostInput" class="form-control" value="{{ settings.host }}">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Bind port</label>
+                                    <input type="number" min="1" max="65535" id="portInput" class="form-control"
+                                           value="{{ settings.port }}">
+                                </div>
+                            </div>
+                            <div class="alert alert-warning py-2 mb-0">
+                                Changes to the bind host and port take effect after restarting the app.
+                            </div>
+                        </div>
+
+                        <!-- Watching -->
+                        <div class="tab-pane fade" id="tab-watching">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Watch interval (seconds)</label>
+                                    <input type="number" min="15" id="watchIntervalInput" class="form-control"
+                                           value="{{ settings.watch_interval }}">
+                                    <div class="form-text">
+                                        How often the app checks watched repositories for new requests.
+                                        Minimum 15 seconds; takes effect without a restart.
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="alert alert-info py-2 mb-0">
+                                Click the bell (🔔) next to a repository in the sidebar to watch it for
+                                new pull/merge requests. New requests show a notification here and play
+                                a short sound. Watching is off by default and per repository.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <span class="muted small me-auto" id="settingsStatus"></span>
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toasts for new pull requests in watched repositories -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastContainer"></div>
+
+    {% include "_dialogs.html" %}
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='dialogs.js') }}"></script>
+    <script>
+        const DEFAULT_PROMPT = {{ default_review_prompt | tojson }};
+        const DEFAULT_MAX_PROMPT = {{ settings.defaults.max_prompt_chars | tojson }};
+        const DEFAULT_MAX_DESC = {{ settings.defaults.max_description_chars | tojson }};
+        const DEFAULT_TIMEOUT = {{ settings.defaults.review_timeout | tojson }};
+        const DEFAULT_WATCH_INTERVAL = {{ settings.defaults.watch_interval | tojson }};
+        const DEFAULT_PORT = {{ settings.defaults.port | tojson }};
+
+        // ---- Theme (light/dark) ----
+        function themeIcon() {
+            const dark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+            document.getElementById('themeToggle').textContent = dark ? '☀️' : '🌙';
+        }
+
+        function toggleTheme() {
+            const next = document.documentElement.getAttribute('data-bs-theme') === 'dark'
+                ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-bs-theme', next);
+            try { localStorage.setItem('pr-theme', next); } catch (e) { /* ignore */ }
+            themeIcon();
+        }
+
+        themeIcon();
+        // Keep following the OS while the user has not picked a theme explicitly.
+        if (window.matchMedia) {
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+                let saved = null;
+                try { saved = localStorage.getItem('pr-theme'); } catch (err) { /* ignore */ }
+                if (!saved) {
+                    document.documentElement.setAttribute('data-bs-theme', e.matches ? 'dark' : 'light');
+                    themeIcon();
+                }
+            });
+        }
+
+        function fieldValue(id) {
+            const el = document.getElementById(id);
+            return el ? el.value.trim() : '';
+        }
+
+        function numberValue(id, fallback) {
+            const raw = fieldValue(id);
+            const n = parseInt(raw, 10);
+            return Number.isFinite(n) ? n : fallback;
+        }
+
+        function promptInput() {
+            return document.getElementById('promptInput');
+        }
+
+        function resetPrompt() {
+            const el = promptInput();
+            if (el) el.value = DEFAULT_PROMPT;
+        }
+
+        // Show the built-in prompt when none is stored yet.
+        if (promptInput() && !promptInput().value.trim()) {
+            promptInput().value = DEFAULT_PROMPT;
+        }
+
+        function addRepo(event) {
+            event.preventDefault();
+            const input = document.getElementById('repoInput');
+            const repo = input.value.trim();
+            if (!repo) return;
+            fetch('/api/repos', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    repos: [repo],
+                    provider: document.getElementById('providerInput').value
+                })
+            }).then(r => r.json()).then(data => {
+                if (data.errors && data.errors.length) {
+                    appAlert({ title: 'Could not add repository', message: data.errors });
+                    return;
+                }
+                input.value = '';
+                location.reload();
+            });
+        }
+
+        function removeRepo(slug) {
+            appConfirm({
+                title: 'Remove repository',
+                message: 'Remove ' + slug + ' and its stored pull requests?',
+                okText: 'Remove',
+                okClass: 'btn-danger'
+            }).then(ok => {
+                if (!ok) return;
+                fetch('/api/repos/' + encodeURIComponent(slug), { method: 'DELETE' })
+                    .then(r => r.json())
+                    .then(() => location.reload());
+            });
+        }
+
+        function toggleWatch(slug, watch) {
+            fetch('/api/repos/' + encodeURIComponent(slug) + '/watch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ watch: watch })
+            }).then(r => r.json()).then(() => location.reload());
+        }
+
+        async function loadModels(force) {
+            const agent = fieldValue('modelsAgent');
+            const status = document.getElementById('modelsStatus');
+            const listEl = document.getElementById('modelList');
+            const datalist = document.getElementById('modelOptions');
+            if (!agent) return;
+            status.textContent = 'Loading models from ' + agent + '…';
+            listEl.innerHTML = '';
+            try {
+                const url = '/api/agents/' + encodeURIComponent(agent) + '/models'
+                    + (force ? '?refresh=1' : '');
+                const res = await fetch(url);
+                const data = await res.json();
+                const models = data.models || [];
+                if (datalist) {
+                    datalist.innerHTML = models
+                        .map(m => '<option value="' + m + '"></option>').join('');
+                }
+                let message = models.length
+                    ? models.length + ' model(s) for ' + agent + ':'
+                    : 'No models reported for ' + agent + '.';
+                if (data.error) message += ' ' + data.error;
+                status.textContent = message;
+                listEl.innerHTML = models.map(m =>
+                    '<button type="button" class="badge app-count-badge model-pick" '
+                    + 'data-model="' + m + '">' + m + '</button>'
+                ).join('');
+                listEl.querySelectorAll('.model-pick').forEach(btn => {
+                    btn.addEventListener('click', () => pickModel(btn.dataset.model));
+                });
+            } catch (err) {
+                status.textContent = 'Could not load models: ' + err;
+            }
+        }
+
+        function pickModel(model) {
+            const el = document.getElementById('modelInput');
+            if (el) {
+                el.value = model;
+                el.focus();
+            }
+        }
+
+        const settingsModal = document.getElementById('settingsModal');
+        if (settingsModal) {
+            settingsModal.addEventListener('shown.bs.modal', () => {
+                if (!document.getElementById('modelsStatus').textContent) {
+                    loadModels(false);
+                }
+            });
+        }
+
+        // Hover tooltips (e.g. the prompt placeholder descriptions in Settings).
+        // Attach to the body so they are not clipped by the scrollable modal.
+        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+            new bootstrap.Tooltip(el, { container: 'body' });
+        });
+
+        function saveSettings() {
+            const commands = {};
+            document.querySelectorAll('.agent-command').forEach(el => {
+                if (el.value.trim()) commands[el.dataset.agent] = el.value.trim();
+            });
+            const binaries = {};
+            document.querySelectorAll('.agent-binary').forEach(el => {
+                if (el.value.trim()) binaries[el.dataset.agent] = el.value.trim();
+            });
+            const modelCommands = {};
+            document.querySelectorAll('.agent-model-command').forEach(el => {
+                if (el.value.trim()) modelCommands[el.dataset.agent] = el.value.trim();
+            });
+
+            // Store an empty prompt when it still matches the built-in default.
+            let prompt = promptInput() ? promptInput().value.trim() : '';
+            if (prompt === DEFAULT_PROMPT.trim()) prompt = '';
+
+            const payload = {
+                github_url: fieldValue('githubUrlInput'),
+                github_api_url: fieldValue('githubApiInput'),
+                gitlab_url: fieldValue('gitlabUrlInput'),
+                gitlab_api_url: fieldValue('gitlabApiInput'),
+                default_agent: fieldValue('agentInput'),
+                default_model: fieldValue('modelInput'),
+                custom_command: fieldValue('customInput'),
+                review_prompt: prompt,
+                review_timeout: numberValue('timeoutInput', DEFAULT_TIMEOUT),
+                max_prompt_chars: numberValue('maxPromptInput', DEFAULT_MAX_PROMPT),
+                max_description_chars: numberValue('maxDescInput', DEFAULT_MAX_DESC),
+                watch_interval: numberValue('watchIntervalInput', DEFAULT_WATCH_INTERVAL),
+                host: fieldValue('hostInput'),
+                port: numberValue('portInput', DEFAULT_PORT),
+                agent_commands: commands,
+                agent_binaries: binaries,
+                agent_model_commands: modelCommands
+            };
+
+            const githubToken = fieldValue('githubTokenInput');
+            if (githubToken) payload.github_token = githubToken;
+            const gitlabToken = fieldValue('gitlabTokenInput');
+            if (gitlabToken) payload.gitlab_token = gitlabToken;
+
+            const status = document.getElementById('settingsStatus');
+            status.textContent = 'Saving…';
+            fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(r => r.json()).then(() => location.reload())
+              .catch(() => { status.textContent = 'Could not save settings.'; });
+        }
+
+        function syncNow() {
+            const spinner = document.getElementById('syncSpinner');
+            const btn = document.getElementById('syncBtn');
+            spinner.classList.remove('d-none');
+            btn.disabled = true;
+            fetch('/api/sync', { method: 'POST' })
+                .then(r => r.json())
+                .then(() => location.reload())
+                .catch(() => { spinner.classList.add('d-none'); btn.disabled = false; });
+        }
+
+        // ---- New-PR notifications for watched repositories ----
+        const NOTIFY_POLL_MS = 15000;
+        let audioCtx = null;
+
+        // Browsers only allow audio after the user interacts with the page, so
+        // create/resume the audio context on the first gesture.
+        ['click', 'keydown', 'touchstart'].forEach(evt =>
+            window.addEventListener(evt, ensureAudio, { once: true }));
+
+        function ensureAudio() {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!audioCtx && Ctx) audioCtx = new Ctx();
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume().catch(() => {});
+            }
+            return audioCtx;
+        }
+
+        function playChime() {
+            const ctx = ensureAudio();
+            if (!ctx) return;
+            try {
+                const now = ctx.currentTime;
+                [880, 1320].forEach((freq, i) => {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    const start = now + i * 0.12;
+                    gain.gain.setValueAtTime(0.0001, start);
+                    gain.gain.exponentialRampToValueAtTime(0.15, start + 0.02);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
+                    osc.connect(gain).connect(ctx.destination);
+                    osc.start(start);
+                    osc.stop(start + 0.25);
+                });
+            } catch (err) { /* audio is best-effort */ }
+        }
+
+        function showNotification(n) {
+            const container = document.getElementById('toastContainer');
+            if (!container) return;
+            const el = document.createElement('div');
+            el.className = 'toast';
+            el.setAttribute('role', 'alert');
+            el.innerHTML =
+                '<div class="toast-header">' +
+                '<span class="me-auto">🔔 New pull request</span>' +
+                '<button type="button" class="btn-close" data-bs-dismiss="toast"></button>' +
+                '</div>' +
+                '<div class="toast-body"></div>';
+            const body = el.querySelector('.toast-body');
+            const link = document.createElement('a');
+            link.href = '/pr/' + n.pr_id;
+            link.className = 'fw-semibold';
+            link.textContent = n.repo + ' #' + n.number;
+            body.appendChild(link);
+            body.appendChild(document.createElement('br'));
+            body.appendChild(document.createTextNode(n.title || ''));
+            container.appendChild(el);
+            el.addEventListener('hidden.bs.toast', () => el.remove());
+            new bootstrap.Toast(el, { autohide: true, delay: 8000 }).show();
+        }
+
+        async function pollNotifications() {
+            try {
+                const res = await fetch('/api/notifications?unseen=1');
+                const data = await res.json();
+                const items = data.notifications || [];
+                if (!items.length) return;
+                items.forEach(showNotification);
+                playChime();
+                await fetch('/api/notifications/seen', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: items.map(n => n.id) })
+                });
+            } catch (err) { /* keep polling */ }
+        }
+
+        pollNotifications();
+        setInterval(pollNotifications, NOTIFY_POLL_MS);
+
+        // ---- AI Reviewed list (sidebar) ----
+        const REVIEWED_POLL_MS = 15000;
+        let reviewedSignature = null;
+
+        function escapeHtml(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function reviewedItemHtml(item) {
+            const status = item.status || 'pending';
+            const label = item.status_label || 'Reviewed';
+            const title = item.full_name + ' #' + item.number + ' — ' + (item.title || '');
+            return '<div class="reviewed-item" data-pr-id="' + item.pr_id + '">'
+                + '<a class="reviewed-link" href="/pr/' + item.pr_id + '" title="' + escapeHtml(title) + '">'
+                + '<span class="reviewed-dot status-' + status + '"></span>'
+                + '<span class="reviewed-main">'
+                + '<span class="reviewed-title">#' + item.number + ' '
+                + escapeHtml(item.title || '') + '</span>'
+                + '<span class="reviewed-sub muted">' + escapeHtml(item.full_name || '')
+                + ' · ' + escapeHtml(label) + '</span>'
+                + '</span></a>'
+                + '<button type="button" class="repo-remove reviewed-remove" '
+                + 'title="Remove from AI Reviewed list">&times;</button>'
+                + '</div>';
+        }
+
+        function updateReviewedCount() {
+            const list = document.getElementById('reviewedList');
+            const empty = document.getElementById('reviewedEmpty');
+            const badge = document.getElementById('reviewedCount');
+            const count = list ? list.querySelectorAll('.reviewed-item').length : 0;
+            if (badge) badge.textContent = count;
+            if (empty) empty.classList.toggle('d-none', count > 0);
+        }
+
+        // Re-render only when the list or a status actually changed.
+        async function refreshReviewed() {
+            const list = document.getElementById('reviewedList');
+            if (!list) return;
+            try {
+                const res = await fetch('/api/reviewed');
+                const data = await res.json();
+                const items = data.reviewed || [];
+                const signature = items.map(i => i.pr_id + ':' + (i.status || '')).join('|');
+                if (signature === reviewedSignature) return;
+                reviewedSignature = signature;
+                list.innerHTML = items.map(reviewedItemHtml).join('');
+                updateReviewedCount();
+            } catch (err) { /* keep polling */ }
+        }
+
+        function dismissReviewed(prId) {
+            fetch('/api/reviewed/' + encodeURIComponent(prId), { method: 'DELETE' })
+                .then(r => r.json())
+                .then(() => {
+                    const item = document.querySelector(
+                        '.reviewed-item[data-pr-id="' + prId + '"]');
+                    if (item) item.remove();
+                    updateReviewedCount();
+                    reviewedSignature = null;
+                })
+                .catch(() => {});
+        }
+
+        const reviewedListEl = document.getElementById('reviewedList');
+        if (reviewedListEl) {
+            reviewedListEl.addEventListener('click', (event) => {
+                const btn = event.target.closest('.reviewed-remove');
+                if (!btn) return;
+                const item = btn.closest('.reviewed-item');
+                if (item) dismissReviewed(item.dataset.prId);
+            });
+        }
+
+        refreshReviewed();
+        setInterval(refreshReviewed, REVIEWED_POLL_MS);
+
+        // ---- Resizable sidebar ----
+        const SIDEBAR_WIDTH_KEY = 'pr-sidebar-width';
+        const SIDEBAR_MIN = 220;
+        const SIDEBAR_MAX = 640;
+        const SIDEBAR_DEFAULT = 300;
+
+        function initSidebarResizer() {
+            const resizer = document.getElementById('sidebarResizer');
+            const sidebar = document.querySelector('.sidebar');
+            if (!resizer || !sidebar) return;
+
+            const root = document.documentElement;
+            let dragging = false;
+
+            // Keep at least ~320px for the content area.
+            function maxWidth() {
+                return Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, window.innerWidth - 320));
+            }
+
+            function applyWidth(px) {
+                const width = Math.max(SIDEBAR_MIN, Math.min(maxWidth(), px));
+                root.style.setProperty('--sidebar-width', width + 'px');
+                return width;
+            }
+
+            function currentWidth() {
+                return sidebar.getBoundingClientRect().width;
+            }
+
+            function remember(width) {
+                try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(width))); }
+                catch (err) { /* ignore */ }
+            }
+
+            resizer.addEventListener('pointerdown', (event) => {
+                dragging = true;
+                resizer.classList.add('dragging');
+                resizer.setPointerCapture(event.pointerId);
+                document.body.style.userSelect = 'none';
+                event.preventDefault();
+            });
+
+            resizer.addEventListener('pointermove', (event) => {
+                if (!dragging) return;
+                const left = sidebar.getBoundingClientRect().left;
+                applyWidth(event.clientX - left);
+            });
+
+            function stopDrag() {
+                if (!dragging) return;
+                dragging = false;
+                resizer.classList.remove('dragging');
+                document.body.style.userSelect = '';
+                remember(currentWidth());
+            }
+
+            resizer.addEventListener('pointerup', stopDrag);
+            resizer.addEventListener('pointercancel', stopDrag);
+
+            // Arrow keys resize too; Shift steps further.
+            resizer.addEventListener('keydown', (event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                event.preventDefault();
+                const step = event.shiftKey ? 40 : 16;
+                const width = applyWidth(
+                    currentWidth() + (event.key === 'ArrowRight' ? step : -step));
+                remember(width);
+            });
+
+            resizer.addEventListener('dblclick', () => remember(applyWidth(SIDEBAR_DEFAULT)));
+
+            // Re-clamp when the window shrinks (mobile stacks, so skip it there).
+            window.addEventListener('resize', () => {
+                if (window.innerWidth > 767.98) applyWidth(currentWidth());
+            });
+        }
+
+        initSidebarResizer();
+    </script>
+</body>
+</html>
