@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PR Reviewer{% if selected %} - {{ selected.full_name }}{% endif %}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='icon.svg') }}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='icon-180.png') }}">
     <script>
         // Apply the saved theme (default: system preference) and sidebar width
         // before first paint.
@@ -159,7 +161,10 @@
 </head>
 <body>
     <nav class="navbar app-navbar px-3">
-        <span class="navbar-brand mb-0"><span class="app-brand-mark">PR</span>PR Reviewer</span>
+        <span class="navbar-brand mb-0">
+            <img src="{{ url_for('static', filename='icon.svg') }}" alt=""
+                 class="app-brand-icon" width="26" height="26">PR Reviewer
+        </span>
         <div class="d-flex align-items-center gap-2">
             <span class="badge bg-secondary" id="totalBadge">Total: {{ total_prs }}</span>
             <button class="btn btn-sm btn-light" id="syncBtn" onclick="syncNow()">

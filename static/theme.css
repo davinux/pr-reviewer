@@ -131,21 +131,14 @@ a:hover { color: var(--app-accent); }
 }
 .app-navbar a { color: var(--app-navbar-link); text-decoration: none; }
 .app-navbar a:hover { color: var(--app-navbar-fg); }
-.app-brand-mark {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+.app-brand-icon {
     width: 26px;
     height: 26px;
     border-radius: 8px;
     margin-right: .5rem;
-    background: var(--app-accent);
-    color: #fff;
-    font-size: .72rem;
-    font-weight: 700;
-    letter-spacing: .02em;
+    vertical-align: -.35rem;
+    flex: 0 0 auto;
 }
-[data-bs-theme="dark"] .app-brand-mark { color: #0d1117; }
 
 /* ------------------------------------------------------------------- Panels */
 .panel {

@@ -379,7 +379,10 @@ pr-reviewer/
 │   ├── index.html         # Repo selector + request queue
 │   └── pr_detail.html     # Request details + AI review panel
 └── static/
-    └── theme.css          # Shared light/dark palette and base chrome
+    ├── theme.css          # Shared light/dark palette and base chrome
+    ├── icon.svg           # App icon: pull request + review check (favicon + navbar)
+    ├── favicon.ico        # Multi-size raster favicon served at /favicon.ico
+    └── icon-180.png       # Rasterized icon (180x180) for iOS home-screen bookmarks
 ```
 
 ## Troubleshooting
