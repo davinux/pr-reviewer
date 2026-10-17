@@ -13,7 +13,7 @@ orchestration in ``reviewer.py``.
 import threading
 import time
 
-from flask import Flask, jsonify, redirect, render_template, request, url_for
+from flask import Flask, jsonify, render_template, request, send_from_directory, url_for
 
 import agents
 import providers
@@ -195,8 +195,12 @@ def start_watcher():
 # --------------------------------------------------------------------------- #
 @app.route("/favicon.ico")
 def favicon():
-    """Browsers request /favicon.ico directly; point them at the SVG icon."""
-    return redirect(url_for("static", filename="icon.svg"))
+    """Browsers request /favicon.ico directly; serve the raster icon with a 200.
+
+    Serving the bytes (rather than redirecting to the SVG) means clients that
+    do not follow redirects, or that cannot render SVG, still get a usable icon.
+    """
+    return send_from_directory(app.static_folder, "favicon.ico")
 
 
 @app.route("/")
