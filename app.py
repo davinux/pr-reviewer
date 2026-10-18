@@ -220,15 +220,60 @@ def reviewed_prs_payload():
     return items
 
 
+def auto_review_agent(settings):
+    """The agent to use for automatic reviews, or ``None`` when none can run.
+
+    Automatic reviews use the repository's configured agent, falling back to the
+    first installed one. An agent is only returned when it can actually run
+    here (the built-in binaries are on ``PATH``, or a custom command is set), so
+    a watched repository never queues reviews that are doomed to fail.
+    """
+    configured = (settings.get("default_agent") or "").strip()
+    if configured == agents.CUSTOM_ID:
+        return agents.CUSTOM_ID if (settings.get("custom_command") or "").strip() else None
+    installed = agents.available_agents(settings)
+    if configured:
+        return configured if any(a["id"] == configured for a in installed) else None
+    return installed[0]["id"] if installed else None
+
+
+def start_auto_reviews(new_requests, settings):
+    """Start a review for each request with watching turned on.
+
+    ``new_requests`` is a list of ``(pr_id, repo)`` pairs for requests that just
+    appeared in a watched repository. Reviews run in the background like manual
+    ones, using each repository's effective settings (its own overrides, or the
+    global ones). Returns the number of reviews queued (requests without a
+    usable agent, or with a review already running, are skipped).
+    """
+    started = 0
+    for pr_id, repo in new_requests:
+        pr = storage.get_pr(pr_id)
+        if not pr:
+            continue
+        repo_settings = effective_repo_settings(settings, repo)
+        agent_id = auto_review_agent(repo_settings)
+        if not agent_id:
+            continue
+        model = (repo_settings.get("default_model") or "").strip()
+        try:
+            reviewer.start_review(pr, agent_id, model, repo_settings)
+            started += 1
+        except RuntimeError as exc:  # a review is already running for this request
+            print(f"Skipping auto-review for {repo['slug']} #{pr['number']}: {exc}")
+    return started
+
+
 def sync_repos(only_watched=False):
     """Fetch pull/merge requests from every repository's provider.
 
     Both open and finished (closed/merged) requests are fetched, so a request
     that was closed upstream is updated in storage instead of staying "open".
-    New requests in a *watched* repository are queued as notifications, unless
-    the repository is being synced for the very first time (everything would
-    look new then). Returns the sync summary; when new watched requests were
-    found, ``notifications`` carries them for immediate display.
+    New requests in a *watched* repository are queued as notifications and, for
+    open ones, a review is started automatically -- unless the repository is
+    being synced for the very first time (everything would look new then).
+    Returns the sync summary; when new watched requests were found,
+    ``notifications`` carries them for immediate display.
     """
     if not _sync_lock.acquire(blocking=False):
         return {"new_prs": 0, "total_prs": storage.count_prs(), "busy": True}
@@ -238,6 +283,7 @@ def sync_repos(only_watched=False):
         known = storage.existing_pr_meta()
         new_prs = 0
         notifications = []
+        auto_reviews = []
 
         for repo in storage.list_repos():
             if only_watched and not repo["watch"]:
@@ -263,11 +309,12 @@ def sync_repos(only_watched=False):
                     storage.save_pr(entry, comments)
                     if is_new:
                         new_prs += 1
-                        # Only alert for requests that are actually open; a
-                        # first fetch of a repo's history surfaces closed and
-                        # merged requests too, and those are not news.
+                        # Only alert and auto-review requests that are actually
+                        # open; a first fetch of a repo's history surfaces
+                        # closed and merged requests too, and those are not news.
                         if repo["watch"] and not first_sync and entry.get("state") == "open":
                             notifications.append(entry)
+                            auto_reviews.append((entry["id"], repo))
                 else:
                     storage.save_pr(entry)
                 known[entry["id"]] = entry.get("updated_at")
@@ -275,7 +322,11 @@ def sync_repos(only_watched=False):
         for entry in notifications:
             storage.add_notification(entry)
 
+        auto_reviewed = start_auto_reviews(auto_reviews, settings)
+
         payload = {"new_prs": new_prs, "total_prs": storage.count_prs()}
+        if auto_reviewed:
+            payload["auto_reviewed"] = auto_reviewed
         if notifications:
             payload["notifications"] = [
                 {

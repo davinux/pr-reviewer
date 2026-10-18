@@ -63,6 +63,22 @@ Return the review as Markdown.
 _active_lock = threading.Lock()
 _active_prs = set()
 
+# Reviews of different requests in the same repository share one checkout
+# (``workspaces/<slug>``), so they must not fetch/check out on top of each other.
+# A lock per slug serialises them; different repositories still run in parallel.
+_repo_locks = {}
+_repo_locks_lock = threading.Lock()
+
+
+def _workspace_lock(slug):
+    """Return the lock that serialises reviews sharing one workspace."""
+    with _repo_locks_lock:
+        lock = _repo_locks.get(slug)
+        if lock is None:
+            lock = threading.Lock()
+            _repo_locks[slug] = lock
+        return lock
+
 
 def _as_int(value, default):
     try:
@@ -221,36 +237,37 @@ def _run_review(review_id, pr, agent_id, model, settings):
         fields.setdefault("duration_ms", int((time.time() - started) * 1000))
         storage.update_review(review_id, status=status, **fields)
 
-    try:
-        storage.update_review(review_id, status="preparing")
-        workspace = prepare_workspace(repo, pr, token, settings)
-        storage.update_review(review_id, workspace=workspace)
+    with _workspace_lock(repo["slug"]):
+        try:
+            storage.update_review(review_id, status="preparing")
+            workspace = prepare_workspace(repo, pr, token, settings)
+            storage.update_review(review_id, workspace=workspace)
 
-        prompt = build_prompt(pr, pr.get("base_ref") or "main", settings)
-        command, error = agents.resolve_command(agent_id, prompt, model, settings)
-        if error:
-            finish("error", error=error)
-            return
+            prompt = build_prompt(pr, pr.get("base_ref") or "main", settings)
+            command, error = agents.resolve_command(agent_id, prompt, model, settings)
+            if error:
+                finish("error", error=error)
+                return
 
-        display = " ".join(shlex.quote("<prompt>" if arg == prompt else arg) for arg in command)
-        storage.update_review(review_id, status="running", command=_redact(display, token))
+            display = " ".join(shlex.quote("<prompt>" if arg == prompt else arg) for arg in command)
+            storage.update_review(review_id, status="running", command=_redact(display, token))
 
-        proc = agents.run(command, cwd=workspace, timeout=timeout)
-        output = (proc.stdout or "").strip()
-        stderr = _redact((proc.stderr or "").strip(), token)
+            proc = agents.run(command, cwd=workspace, timeout=timeout)
+            output = (proc.stdout or "").strip()
+            stderr = _redact((proc.stderr or "").strip(), token)
 
-        if proc.returncode == 0:
-            finish("done", output=output, error=stderr or None)
-        else:
-            finish(
-                "error",
-                output=output or None,
-                error=stderr or f"Agent exited with code {proc.returncode}",
-            )
-    except subprocess.TimeoutExpired:
-        finish("error", error=f"Agent timed out after {timeout} seconds.")
-    except Exception as exc:  # noqa: BLE001 - surfaced in the UI
-        finish("error", error=_redact(str(exc), token))
-    finally:
-        with _active_lock:
-            _active_prs.discard(pr["id"])
+            if proc.returncode == 0:
+                finish("done", output=output, error=stderr or None)
+            else:
+                finish(
+                    "error",
+                    output=output or None,
+                    error=stderr or f"Agent exited with code {proc.returncode}",
+                )
+        except subprocess.TimeoutExpired:
+            finish("error", error=f"Agent timed out after {timeout} seconds.")
+        except Exception as exc:  # noqa: BLE001 - surfaced in the UI
+            finish("error", error=_redact(str(exc), token))
+        finally:
+            with _active_lock:
+                _active_prs.discard(pr["id"])
