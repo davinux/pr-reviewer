@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS reviews (
     workspace   TEXT,
     output      TEXT,
     error       TEXT,
+    log         TEXT,
     created_at  TEXT NOT NULL,
     finished_at TEXT,
     duration_ms INTEGER,
@@ -191,11 +192,13 @@ _EXTRA_PR_COLUMNS = {
     "author_avatar": "TEXT",
 }
 
-# Review columns added after the first release: the parsed verdict and the head
-# commit the review was started against (used to spot new commits since).
+# Review columns added after the first release: the parsed verdict, the head
+# commit the review was started against (used to spot new commits since), and the
+# streamed run log (see specs/011-review-timer-and-logs).
 _EXTRA_REVIEW_COLUMNS = {
     "verdict": "TEXT",
     "head_sha": "TEXT",
+    "log": "TEXT",
 }
 
 _init_lock = threading.Lock()
@@ -793,7 +796,7 @@ def _notification_dict(row):
 # Reviews
 # --------------------------------------------------------------------------- #
 REVIEW_FIELDS = {
-    "status", "prompt", "command", "workspace", "output", "error",
+    "status", "prompt", "command", "workspace", "output", "error", "log",
     "finished_at", "duration_ms", "model", "agent", "verdict", "head_sha",
 }
 
@@ -938,6 +941,7 @@ def _review_dict(row):
         "workspace": row["workspace"],
         "output": row["output"],
         "error": row["error"],
+        "log": row["log"] if "log" in row.keys() else None,
         "created_at": row["created_at"],
         "finished_at": row["finished_at"],
         "duration_ms": row["duration_ms"],

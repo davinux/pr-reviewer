@@ -26,7 +26,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 # A prompt larger than this is truncated before being passed to the agent. It is
 # a safety valve so an enormous diff cannot blow past the OS argument limit.
@@ -339,4 +339,82 @@ def run(command: Sequence[str], cwd: str, timeout: int = 900, env=None) -> subpr
         text=True,
         timeout=timeout,
         env=run_env,
+    )
+
+
+def run_streaming(
+    command: Sequence[str],
+    cwd: str,
+    timeout: int = 900,
+    env=None,
+    on_output: Optional[Callable[[str, str], None]] = None,
+) -> subprocess.CompletedProcess:
+    """Run an agent command, reporting output as it arrives.
+
+    Reads ``stdout`` and ``stderr`` line by line and calls
+    ``on_output(stream, line)`` for each line as the process produces it
+    (``stream`` is ``"stdout"`` or ``"stderr"``), so a review that runs for
+    minutes can show its progress live. Returns a
+    ``subprocess.CompletedProcess`` with the complete ``stdout``/``stderr`` text,
+    so the caller decides success exactly as with :func:`run`. Raises
+    ``subprocess.TimeoutExpired`` after killing the process on timeout; whatever
+    was streamed before the kill has already been reported.
+    """
+    run_env = _agent_env()
+    if env:
+        run_env.update(env)
+    argv = list(command)
+    proc = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        env=run_env,
+    )
+
+    buffers = {"stdout": [], "stderr": []}
+    lock = threading.Lock()
+
+    def _pump(stream, name):
+        try:
+            for line in iter(stream.readline, ""):
+                with lock:
+                    buffers[name].append(line)
+                if on_output is not None:
+                    try:
+                        on_output(name, line)
+                    except Exception:  # noqa: BLE001 - never lose the stream
+                        pass
+        finally:
+            stream.close()
+
+    readers = [
+        threading.Thread(target=_pump, args=(proc.stdout, "stdout"), daemon=True),
+        threading.Thread(target=_pump, args=(proc.stderr, "stderr"), daemon=True),
+    ]
+    for reader in readers:
+        reader.start()
+
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        for reader in readers:
+            reader.join(timeout=5)
+        raise
+
+    for reader in readers:
+        reader.join(timeout=5)
+
+    return subprocess.CompletedProcess(
+        argv,
+        proc.returncode,
+        "".join(buffers["stdout"]),
+        "".join(buffers["stderr"]),
     )
