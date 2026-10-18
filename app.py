@@ -1,9 +1,9 @@
 """PR Reviewer - a Flask app for reviewing GitHub and GitLab merge requests
 with local coding-agent CLIs.
 
-It lists open pull/merge requests, and on demand clones a repository, checks out
-the request and runs an installed agent (opencode, pi, claude, copilot, ...) to
-produce a review.
+It lists pull/merge requests across the configured repositories (open, closed
+and merged), and on demand clones a repository, checks out the request and runs
+an installed agent (opencode, pi, claude, copilot, ...) to produce a review.
 
 Data lives in ``DATA_DIR`` (default ``./data``); see ``storage.py``. Hosting
 providers are in ``providers.py``, agents in ``agents.py`` and the review
@@ -85,6 +85,31 @@ REVIEW_STATUS_LABELS = {
     "error": "Failed",
 }
 
+# Pull-request states offered as tabs on the request list. "all" shows every
+# stored request (open, closed and merged).
+PR_STATE_TABS = (
+    ("open", "Open"),
+    ("closed", "Closed"),
+    ("merged", "Merged"),
+    ("all", "All"),
+)
+PR_STATE_KEYS = {key for key, _ in PR_STATE_TABS}
+DEFAULT_PR_STATE = "open"
+
+
+def _selected_state(value):
+    """Normalise the ``state`` query argument, defaulting to open requests."""
+    state = (value or "").strip().lower()
+    return state if state in PR_STATE_KEYS else DEFAULT_PR_STATE
+
+
+def _state_summary(count, total, state):
+    """Small caption for the list header, e.g. "2 open · 5 total"."""
+    label = dict(PR_STATE_TABS).get(state, state.title())
+    if state == "all":
+        return f"{total} pull request(s)"
+    return f"{count} {label.lower()} · {total} total"
+
 
 def reviewed_prs_payload():
     """AI-reviewed pull requests with a display label for their latest status."""
@@ -96,8 +121,10 @@ def reviewed_prs_payload():
 
 
 def sync_repos(only_watched=False):
-    """Fetch open pull/merge requests from every repository's provider.
+    """Fetch pull/merge requests from every repository's provider.
 
+    Both open and finished (closed/merged) requests are fetched, so a request
+    that was closed upstream is updated in storage instead of staying "open".
     New requests in a *watched* repository are queued as notifications, unless
     the repository is being synced for the very first time (everything would
     look new then). Returns the sync summary; when new watched requests were
@@ -136,7 +163,10 @@ def sync_repos(only_watched=False):
                     storage.save_pr(entry, comments)
                     if is_new:
                         new_prs += 1
-                        if repo["watch"] and not first_sync:
+                        # Only alert for requests that are actually open; a
+                        # first fetch of a repo's history surfaces closed and
+                        # merged requests too, and those are not news.
+                        if repo["watch"] and not first_sync and entry.get("state") == "open":
                             notifications.append(entry)
                 else:
                     storage.save_pr(entry)
@@ -213,15 +243,22 @@ def index():
         if selected is None:
             selected_slug = None
 
+    state = _selected_state(request.args.get("state"))
+    pr_counts = storage.pr_state_counts(selected_slug)
+
     settings = settings_payload()
     return render_template(
         "index.html",
         repos=repos,
         selected=selected,
         selected_slug=selected_slug,
-        pr_data=storage.list_prs(selected_slug),
+        state=state,
+        state_tabs=PR_STATE_TABS,
+        state_summary=_state_summary(pr_counts[state], pr_counts["all"], state),
+        pr_counts=pr_counts,
+        pr_data=storage.list_prs(selected_slug, state),
         total_prs=storage.count_prs(),
-        repo_total=storage.count_prs(selected_slug),
+        open_prs=storage.count_prs(state="open"),
         reviewed=reviewed_prs_payload(),
         settings=settings,
         agents=agents.detect_agents(settings),
@@ -239,7 +276,12 @@ def api_sync():
 def api_prs():
     """Read the stored pull requests without contacting any provider."""
     repo = request.args.get("repo") or None
-    return jsonify({"prs": storage.list_prs(repo), "total": storage.count_prs(repo)})
+    state = _selected_state(request.args.get("state"))
+    return jsonify({
+        "prs": storage.list_prs(repo, state),
+        "total": storage.count_prs(repo, state),
+        "counts": storage.pr_state_counts(repo),
+    })
 
 
 @app.route("/api/repos", methods=["GET", "POST"])
