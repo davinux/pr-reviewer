@@ -115,4 +115,6 @@ history survives.
 - **Extended by**: spec
   [007-auto-archive-reviewed](../007-auto-archive-reviewed/spec.md). It adds
   automatic archiving when a tracked request transitions to closed/merged and a
-  confirmation before the sidebar's remove control (FR-004) runs.
+  confirmation before the sidebar's remove control (FR-004) runs. Spec
+  [008-review-status-api](../008-review-status-api/spec.md) adds the parsed review
+  verdict to each entry and to the `/api/reviewed` payload.

@@ -16,18 +16,22 @@ import time
 from flask import Flask, jsonify, render_template, request, send_from_directory, url_for
 
 import agents
+import api
 import providers
 import reviewer
 import storage
 
 app = Flask(__name__)
 
+# Register the public, read-only v1 API and its Swagger docs (see specs/008).
+api.register(app)
+
 # Settings fields the UI can edit, grouped by type.
 TEXT_SETTINGS = (
     "github_token", "github_url", "github_api_url",
     "gitlab_token", "gitlab_url", "gitlab_api_url",
     "default_agent", "default_model", "custom_command",
-    "review_prompt", "host",
+    "review_prompt", "host", "api_token",
 )
 INT_SETTINGS = (
     "review_timeout", "max_prompt_chars", "max_description_chars",
@@ -77,6 +81,7 @@ def settings_payload():
     settings = get_settings()
     settings["github_token"] = "***" if settings["github_token"] else ""
     settings["gitlab_token"] = "***" if settings["gitlab_token"] else ""
+    settings["api_token"] = "***" if settings["api_token"] else ""
     settings["default_review_prompt"] = reviewer.DEFAULT_REVIEW_PROMPT
     settings["defaults"] = {key: storage.DEFAULT_SETTINGS[key] for key in storage.DEFAULT_SETTINGS}
     return settings
@@ -185,6 +190,13 @@ REVIEW_STATUS_LABELS = {
     "error": "Failed",
 }
 
+# Human-readable labels for the verdict parsed from a completed review.
+REVIEW_VERDICT_LABELS = {
+    "passed": "Passed",
+    "failed": "Needs work",
+    "unknown": "No verdict",
+}
+
 # Pull-request states offered as tabs on the request list. "all" shows every
 # stored request (open, closed and merged).
 PR_STATE_TABS = (
@@ -217,6 +229,10 @@ def reviewed_prs_payload():
     for item in items:
         status = item.get("status") or "pending"
         item["status_label"] = REVIEW_STATUS_LABELS.get(status, status.title())
+        verdict = item.get("verdict")
+        item["verdict_label"] = (
+            REVIEW_VERDICT_LABELS.get(verdict, verdict.title()) if verdict else None
+        )
     return items
 
 

@@ -71,7 +71,7 @@ constitution; the process is in [`specs/README.md`](specs/README.md).
    be asked to commit or to open the PR. Note the branch and PR in your summary.
 
 The next free spec number is the one after the highest in `specs/` (currently
-`007`, so a new feature is `008-`).
+`008`, so a new feature is `009-`).
 
 ### Existing specs
 

@@ -51,6 +51,8 @@ DEFAULT_SETTINGS = {
     # Web server
     "host": "0.0.0.0",
     "port": 5000,
+    # Public read-only API (empty = no authentication)
+    "api_token": "",
 }
 
 # Settings a single repository may override. Everything else is global; the
@@ -128,7 +130,8 @@ CREATE TABLE IF NOT EXISTS reviews (
     error       TEXT,
     created_at  TEXT NOT NULL,
     finished_at TEXT,
-    duration_ms INTEGER
+    duration_ms INTEGER,
+    verdict     TEXT
 );
 
 -- Pull requests the user has cleared from the "AI Reviewed" sidebar list.
@@ -185,6 +188,11 @@ _EXTRA_PR_COLUMNS = {
     "author_avatar": "TEXT",
 }
 
+# Review columns added after the first release (the parsed review verdict).
+_EXTRA_REVIEW_COLUMNS = {
+    "verdict": "TEXT",
+}
+
 _init_lock = threading.Lock()
 _initialized = False
 
@@ -226,7 +234,9 @@ def init_db():
             conn.executescript(SCHEMA)
             _ensure_columns(conn, "repos", _EXTRA_REPO_COLUMNS)
             _ensure_columns(conn, "pull_requests", _EXTRA_PR_COLUMNS)
+            _ensure_columns(conn, "reviews", _EXTRA_REVIEW_COLUMNS)
             _backfill_provider_columns(conn)
+            _backfill_review_verdicts(conn)
             conn.executescript(INDEXES)
         _initialized = True
 
@@ -252,6 +262,19 @@ def _backfill_provider_columns(conn):
     # Rows stored before states were tracked were all open requests; default
     # them so the "Open" tab and the per-state counts agree.
     conn.execute("UPDATE pull_requests SET state = 'open' WHERE state IS NULL OR state = ''")
+
+
+def _backfill_review_verdicts(conn):
+    """Give pre-verdict completed reviews an explicit ``unknown`` verdict.
+
+    Reviews written before the verdict column existed carry nothing; a request
+    that finished without a machine-readable marker is ``unknown``, not NULL, so
+    the API's verdict filter and the "unknown until re-reviewed" promise hold.
+    Only completed reviews are touched, and the update is idempotent.
+    """
+    conn.execute(
+        "UPDATE reviews SET verdict = 'unknown' WHERE status = 'done' AND verdict IS NULL"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -541,6 +564,25 @@ def get_pr(pr_id):
     return _pr_dict(row, [_comment_dict(c) for c in comment_rows])
 
 
+def get_pr_by_number(slug, number):
+    """One request by its repository slug and number, or ``None``.
+
+    Keyed on the slug (``<host>/<owner>/<repo>``) because the same ``owner/repo``
+    may exist on two hosts, so the number alone is not unique. Comments are not
+    loaded -- API callers only need the request's identity.
+    """
+    try:
+        number = int(number)
+    except (TypeError, ValueError):
+        return None
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM pull_requests WHERE slug = ? AND number = ?",
+            (slug, number),
+        ).fetchone()
+    return _pr_dict(row, []) if row else None
+
+
 def list_prs(repo=None, state=None):
     """Return stored pull requests (newest first).
 
@@ -743,7 +785,7 @@ def _notification_dict(row):
 # --------------------------------------------------------------------------- #
 REVIEW_FIELDS = {
     "status", "prompt", "command", "workspace", "output", "error",
-    "finished_at", "duration_ms", "model", "agent",
+    "finished_at", "duration_ms", "model", "agent", "verdict",
 }
 
 
@@ -790,6 +832,83 @@ def list_reviews(pr_id, limit=20):
     return [_review_dict(row) for row in rows]
 
 
+def latest_review(pr_id):
+    """The most recent review for a request, or ``None`` when it has none."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM reviews WHERE pr_id = ? ORDER BY id DESC LIMIT 1", (pr_id,)
+        ).fetchone()
+    return _review_dict(row) if row else None
+
+
+def count_reviews(pr_id):
+    """How many reviews a request has."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM reviews WHERE pr_id = ?", (pr_id,)
+        ).fetchone()
+    return row["n"]
+
+
+# The latest review per request, with the request's identity columns. Unlike the
+# "AI Reviewed" sidebar list this ignores ``dismissed_reviews``: a service asking
+# whether a request passed does not care that the user cleared the sidebar entry.
+_LATEST_REVIEW_SELECT = """
+    SELECT p.id          AS pr_id,
+           p.number      AS number,
+           p.title       AS title,
+           p.full_name   AS full_name,
+           p.slug        AS slug,
+           p.host        AS host,
+           p.state       AS state,
+           p.draft       AS draft,
+           p.url         AS url,
+           r.id          AS review_id,
+           r.status      AS status,
+           r.verdict     AS verdict,
+           r.agent       AS agent,
+           r.model       AS model,
+           r.error       AS error,
+           r.duration_ms AS duration_ms,
+           r.created_at  AS review_created_at,
+           r.finished_at AS finished_at,
+           (SELECT COUNT(*) FROM reviews rr WHERE rr.pr_id = p.id) AS review_count
+    FROM pull_requests p
+    JOIN (
+        SELECT pr_id, MAX(id) AS review_id
+        FROM reviews
+        GROUP BY pr_id
+    ) latest ON latest.pr_id = p.id
+    JOIN reviews r ON r.id = latest.review_id
+"""
+
+
+def list_review_statuses(repo=None, verdict=None, limit=50):
+    """Every reviewed request with its latest review, newest review first.
+
+    Optionally narrowed to one repo slug and/or one stored verdict
+    (``passed``, ``failed`` or ``unknown``). The repo filter is slug-only, to
+    match ``get_pr_by_number`` (the slug is the canonical identity). Unlike
+    ``list_reviewed_prs`` this is not filtered by ``dismissed_reviews``, so it
+    suits an API that reports the truth regardless of the sidebar.
+    """
+    where = []
+    params = []
+    if repo:
+        where.append("p.slug = ?")
+        params.append(repo)
+    if verdict:
+        where.append("r.verdict = ?")
+        params.append(verdict)
+    clause = f" WHERE {' AND '.join(where)}" if where else ""
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"{_LATEST_REVIEW_SELECT}{clause} ORDER BY r.id DESC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def _review_dict(row):
     return {
         "id": row["id"],
@@ -807,6 +926,7 @@ def _review_dict(row):
         "created_at": row["created_at"],
         "finished_at": row["finished_at"],
         "duration_ms": row["duration_ms"],
+        "verdict": row["verdict"] if "verdict" in row.keys() else None,
     }
 
 
@@ -879,6 +999,7 @@ def list_reviewed_prs(limit=50):
                    r.agent         AS agent,
                    r.model         AS model,
                    r.error         AS error,
+                   r.verdict       AS verdict,
                    r.created_at    AS review_created_at,
                    r.finished_at   AS finished_at
             FROM pull_requests p

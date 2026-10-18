@@ -39,6 +39,9 @@ except the GitHub/GitLab API calls and whatever your chosen agent does.
   with its latest status; requests that are merged or closed are archived
   automatically, and you can clear the ones you are done with (after a
   confirmation).
+- **Review status API** — every completed review carries a machine-readable
+  verdict (pass/fail) that other services can query over a small read-only HTTP
+  API, with interactive Swagger docs at <http://localhost:5000/api/docs>.
 - **Local storage** — repositories, requests, comments and reviews live in
   SQLite under a single `data/` folder.
 - **Sync on demand** — a button fetches requests from the hosts when asked,
@@ -64,6 +67,9 @@ except the GitHub/GitLab API calls and whatever your chosen agent does.
    inspects the diff and surrounding code and prints a Markdown review.
 5. The review is saved to the database and shown on the request page, with a
    history of previous reviews.
+6. The agent ends its review with a machine-readable verdict
+   (`REVIEW_VERDICT: PASS` or `REVIEW_VERDICT: FAIL`) that PR Reviewer parses and
+   stores, so the outcome can be read by other tools (see *Review status API*).
 
 ## Requirements
 
@@ -125,8 +131,10 @@ without a pid file — it looks for a Python process whose command line referenc
 
 A small `unittest` suite covers the per-repository settings (parsing, the
 inherit/override/clear round trip, multi-host lookups and input validation), the
-automatic review trigger for watched repositories, and the auto-archive of
-reviewed requests that finish. Run it with:
+automatic review trigger for watched repositories, the auto-archive of reviewed
+requests that finish, and the review-status API (verdict parsing, the status and
+list endpoints, token authentication and the Swagger/OpenAPI endpoints). Run it
+with:
 
 ```bash
 python3 -m unittest discover -s tests
@@ -230,6 +238,82 @@ Notes:
   a new review on the request and it reappears.
 - Removing a repository (or deleting a request) removes its entries too.
 
+## Review status API
+
+Every completed review ends with a machine-readable verdict that the app parses
+and stores: `REVIEW_VERDICT: PASS` or `REVIEW_VERDICT: FAIL`. The app appends
+this instruction to **every** review prompt — the default one and any custom
+template — and the verdict must be the **final line** of the agent's output. A
+request's **latest** review decides its current verdict.
+
+Other services can ask whether a pull/merge request passed over a small,
+read-only API:
+
+```bash
+# by repository slug + number (the canonical <host>/<owner>/<repo> identity)
+curl "http://localhost:5000/api/v1/reviews/status?repo=github.com/acme/api&number=42"
+
+# by the app's internal request id
+curl "http://localhost:5000/api/v1/reviews/status?pr_id=123"
+```
+
+The response reports `passed` (`true`/`false`/`null`), the `verdict`
+(`passed`/`failed`/`unknown`), the latest review's run `status` and a summary:
+
+```json
+{
+  "repo": "github.com/acme/api",
+  "number": 42,
+  "pr_id": 123,
+  "title": "Add the widget",
+  "state": "open",
+  "url": "https://github.com/acme/api/pull/42",
+  "passed": true,
+  "verdict": "passed",
+  "review_status": "done",
+  "reviews": 3,
+  "review": { "id": 7, "status": "done", "verdict": "passed", "agent": "opencode", "model": null }
+}
+```
+
+`passed` is `true` on a PASS verdict, `false` on FAIL, and `null` when nothing is
+decided yet (no review, a review still running, one that errored, or an agent
+that emitted no marker). Because the marker must be the **last** line, an agent
+that adds a closing remark *after* the verdict yields `unknown`; the instruction
+asks it to end there. `GET /api/v1/reviews` lists reviewed requests and can be
+filtered with `?repo=<slug>` and `?verdict=passed|failed|unknown` (`?limit=` caps
+the list).
+
+> **What `passed` means.** It is the reviewing *agent's opinion*, not a verified
+> or security-grade signal. The agent reads content the pull/merge request author
+> controls, so a crafted request can try to steer the agent or the marker. Use
+> `passed` as a convenience gate, not as the only control before a merge.
+
+Browse and try the API in the browser at **<http://localhost:5000/api/docs>**
+(Swagger UI); the OpenAPI 3 document is served at `/api/v1/openapi.json`.
+
+### Protecting the API
+
+The API is open by default, which is fine when the app is only reachable from
+your own machine. If you expose it on a network, set an **API token** under
+**Settings → Server**. Callers must then send it, either way works:
+
+```bash
+curl -H "Authorization: Bearer <token>" "http://localhost:5000/api/v1/reviews?limit=10"
+curl -H "X-API-Token: <token>" "http://localhost:5000/api/v1/reviews?limit=10"
+```
+
+The Swagger UI and the OpenAPI document stay reachable without the token so the
+token can be entered in the UI's **Authorize** dialog; the data endpoints return
+`401` until it is presented. Use the **Clear** button beside the field to remove
+a saved token and return to the open default.
+
+> **Scope:** the API token protects **only** the read-only `/api/v1` endpoints.
+> The rest of the app — `/api/settings`, `/api/sync`, starting reviews,
+> removing repositories and the web UI — is **not** covered by it. Do not expose
+> the app to an untrusted network without separate protection (a firewall, a
+> reverse proxy with authentication, or a VPN).
+
 ## Supported agents
 
 The app detects these on `PATH`:
@@ -309,6 +393,7 @@ configuration can be loaded (default `./data`).
 | Limits | Max description characters | `8000` | Truncate the request description inside the prompt (`0` = no limit). |
 | Watching | Watch interval | `60` | Seconds between background checks of watched repositories (minimum 15). |
 | Server | Bind host / port | `0.0.0.0` / `5000` | Where the web server listens; applied on the next restart. |
+| Server | API token | – | Optional shared token required by the read-only `/api/v1` API. Empty means the API is open. |
 
 ### Review prompt
 
@@ -374,7 +459,8 @@ so keep the `data/` folder private. Example:
   "agent_binaries": {},
   "agent_model_commands": { "opencode": "opencode models" },
   "host": "0.0.0.0",
-  "port": 5000
+  "port": 5000,
+  "api_token": ""
 }
 ```
 
@@ -398,7 +484,7 @@ data/
 | `repos` | Watched repositories (`full_name`, `provider`, `host`, `slug`, `watch`, `settings`). |
 | `pull_requests` | One row per PR/MR (slug, labels, draft, branches, diff stats, ...). |
 | `comments` | Comments/notes (cascade-deleted with the request). |
-| `reviews` | Agent reviews: agent, model, status, output, error, timing. |
+| `reviews` | Agent reviews: agent, model, status, verdict, output, error, timing. |
 | `dismissed_reviews` | Requests cleared from the **AI Reviewed** sidebar list. |
 | `notifications` | New-request alerts for watched repositories (cascade-deleted with the request). |
 
@@ -433,6 +519,14 @@ backfilled). `data/` is gitignored. To reset, stop the app and delete the folder
 | `DELETE` | `/api/reviewed/<id>` | Remove a request from the AI-Reviewed list. |
 | `GET`/`POST` | `/api/settings` | Read/update all settings (tokens are masked on read). |
 | `GET` | `/health` | Status, request count, repo slugs, available agents. |
+| `GET` | `/api/v1/reviews/status` | Whether a request passed its latest review: `?repo=<slug>&number=<n>` or `?pr_id=<id>`. |
+| `GET` | `/api/v1/reviews` | Reviewed requests with verdicts: `?repo=<slug>&verdict=passed\|failed\|unknown&limit=<n>`. |
+| `GET` | `/api/v1/openapi.json` | The OpenAPI 3 document for the v1 API. |
+| `GET` | `/api/docs` | Interactive Swagger UI for the v1 API. |
+
+The `/api/v1` endpoints are read-only and, when an **API token** is configured,
+require it in `Authorization: Bearer <token>` or `X-API-Token`; the docs page and
+the OpenAPI document never require it.
 
 ## Project structure
 
@@ -443,6 +537,8 @@ pr-reviewer/
 ├── storage.py             # SQLite + settings storage layer
 ├── agents.py              # Agent registry: detection + command templates
 ├── reviewer.py            # Workspace checkout + review orchestration
+├── api.py                 # Public read-only v1 API + Swagger docs
+├── openapi.json           # OpenAPI 3 description of the v1 API
 ├── requirements.txt
 ├── AGENTS.md              # Context + workflow for AI coding agents
 ├── specs/                 # Feature specifications (spec-driven development)
@@ -454,7 +550,8 @@ pr-reviewer/
 ├── tests/
 │   ├── test_repo_settings.py     # Per-repository settings tests
 │   ├── test_auto_review.py       # Automatic review of watched repos
-│   └── test_archive_reviewed.py  # Auto-archive of reviewed requests
+│   ├── test_archive_reviewed.py  # Auto-archive of reviewed requests
+│   └── test_api.py               # Review-status API, verdict and Swagger docs
 ├── scripts/
 │   ├── start.sh           # Start the server in the background
 │   ├── stop.sh            # Stop it

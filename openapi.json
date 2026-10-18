@@ -1,0 +1,229 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "PR Reviewer API",
+    "version": "1.0.0",
+    "description": "Read-only access to the outcome of AI code reviews produced by PR Reviewer.\n\nUse it to ask whether a pull/merge request *passed* its latest review. The verdict is parsed from the agent's output (a `REVIEW_VERDICT: PASS` or `REVIEW_VERDICT: FAIL` line): `passed` is `true` for a PASS verdict, `false` for FAIL, and `null` when no verdict is available yet (no review, one still running, errored, or the agent emitted no marker).\n\nAuthentication is optional: when an API token is configured in Settings it must be supplied via `Authorization: Bearer <token>` or the `X-API-Token` header; when no token is set the API is open."
+  },
+  "servers": [
+    { "url": "/", "description": "This PR Reviewer instance" }
+  ],
+  "security": [
+    { "bearerAuth": [] },
+    { "apiToken": [] },
+    {}
+  ],
+  "tags": [
+    { "name": "Reviews", "description": "Review verdicts for stored pull/merge requests." }
+  ],
+  "paths": {
+    "/api/v1/reviews/status": {
+      "get": {
+        "tags": ["Reviews"],
+        "summary": "Whether one request passed its latest review",
+        "operationId": "getReviewStatus",
+        "parameters": [
+          {
+            "name": "repo",
+            "in": "query",
+            "required": false,
+            "description": "Repository slug: `<host>/<owner>/<repo>` (for example `github.com/acme/api`). Required together with `number`, unless `pr_id` is given.",
+            "schema": { "type": "string", "example": "github.com/acme/api" }
+          },
+          {
+            "name": "number",
+            "in": "query",
+            "required": false,
+            "description": "The pull/merge request number. Required together with `repo`, unless `pr_id` is given.",
+            "schema": { "type": "integer", "example": 42 }
+          },
+          {
+            "name": "pr_id",
+            "in": "query",
+            "required": false,
+            "description": "PR Reviewer's internal request id, as an alternative to `repo` + `number`.",
+            "schema": { "type": "integer", "example": 123 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request's latest review result.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ReviewResult" }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or invalid identifying parameters.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "An API token is configured and the request did not present a valid one.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "No stored request matches the identifier.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reviews": {
+      "get": {
+        "tags": ["Reviews"],
+        "summary": "List reviewed requests and their verdicts",
+        "operationId": "listReviews",
+        "parameters": [
+          {
+            "name": "repo",
+            "in": "query",
+            "required": false,
+            "description": "Only requests from this repository slug.",
+            "schema": { "type": "string", "example": "gitlab.com/group/project" }
+          },
+          {
+            "name": "verdict",
+            "in": "query",
+            "required": false,
+            "description": "Only requests whose latest review has this verdict.",
+            "schema": { "type": "string", "enum": ["passed", "failed", "unknown"] }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of results (1–500, default 50).",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reviewed requests, newest review first.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ReviewList" }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid `verdict` filter.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "An API token is configured and the request did not present a valid one.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API token sent as `Authorization: Bearer <token>`. Only required when a token is configured in Settings."
+      },
+      "apiToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Token",
+        "description": "API token sent in the `X-API-Token` header. Only required when a token is configured in Settings."
+      }
+    },
+    "schemas": {
+      "ReviewSummary": {
+        "type": "object",
+        "description": "The most recent review for the request.",
+        "properties": {
+          "id": { "type": "integer", "example": 7 },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "preparing", "running", "done", "error"],
+            "description": "Run status of the review."
+          },
+          "verdict": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["passed", "failed", "unknown", "null"],
+            "description": "`null` while the review is running or if it errored."
+          },
+          "agent": { "type": "string", "nullable": true, "example": "opencode" },
+          "model": { "type": "string", "nullable": true, "example": "anthropic/claude-sonnet-4" },
+          "created_at": { "type": "string", "format": "date-time", "nullable": true },
+          "finished_at": { "type": "string", "format": "date-time", "nullable": true },
+          "duration_ms": { "type": "integer", "nullable": true }
+        }
+      },
+      "ReviewResult": {
+        "type": "object",
+        "properties": {
+          "repo": { "type": "string", "description": "Repository slug.", "example": "github.com/acme/api" },
+          "number": { "type": "integer", "example": 42 },
+          "pr_id": { "type": "integer", "example": 123 },
+          "title": { "type": "string", "nullable": true },
+          "state": { "type": "string", "nullable": true, "enum": ["open", "closed", "merged"] },
+          "url": { "type": "string", "nullable": true },
+          "passed": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "`true` on a PASS verdict, `false` on FAIL, `null` when undecided."
+          },
+          "verdict": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["passed", "failed", "unknown", "null"]
+          },
+          "review_status": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["pending", "preparing", "running", "done", "error"]
+          },
+          "reviews": { "type": "integer", "description": "How many reviews the request has." },
+          "review": {
+            "nullable": true,
+            "allOf": [{ "$ref": "#/components/schemas/ReviewSummary" }]
+          }
+        }
+      },
+      "ReviewList": {
+        "type": "object",
+        "properties": {
+          "count": { "type": "integer" },
+          "reviews": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ReviewResult" }
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string", "example": "missing_parameters" },
+          "message": { "type": "string", "example": "Provide 'repo' and 'number', or 'pr_id'." }
+        }
+      }
+    }
+  }
+}

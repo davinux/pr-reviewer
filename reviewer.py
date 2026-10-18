@@ -12,6 +12,7 @@ for status and output.
 """
 
 import os
+import re
 import shlex
 import subprocess
 import threading
@@ -59,6 +60,63 @@ Produce a focused, actionable review:
 - Do NOT modify any files. This is a read-only review.
 Return the review as Markdown.
 """
+
+# Appended to every rendered review prompt -- including custom templates -- so a
+# completed review always carries a machine-readable outcome. See
+# specs/008-review-status-api. The parser only accepts the marker as the final
+# content line, so it must come last.
+VERDICT_INSTRUCTION = """
+
+---
+Finally, end your response with a single line in exactly this format, on its own
+line, so it can be read by an automated system:
+REVIEW_VERDICT: PASS
+or
+REVIEW_VERDICT: FAIL
+Use PASS when the change is good to merge, and FAIL when it has blocking issues.
+"""
+
+# The verdict must be the marker alone on the final content line of the output.
+# Anchoring there (rather than anywhere in the text) stops diff content or a
+# quoted example from deciding the result, and stops the prompt's own example
+# from being read as a verdict when the agent emits none. Surrounding Markdown
+# (bold, bullets, code fences) is tolerated.
+_VERDICT_LINE_RE = re.compile(
+    r"[\s>*_`#-]*REVIEW_VERDICT:\s*(PASS|FAIL)[\s*_`.:!>#-]*",
+    re.IGNORECASE,
+)
+
+# Lines that carry no verdict: blank lines, code fences and horizontal rules.
+_DECORATION_RE = re.compile(r"[`*_=~-]{2,}")
+
+
+def _last_content_line(output):
+    """The last meaningful line of ``output``, skipping blanks and decorations."""
+    for line in reversed((output or "").splitlines()):
+        stripped = line.strip()
+        if not stripped or _DECORATION_RE.fullmatch(stripped):
+            continue
+        return stripped
+    return None
+
+
+def parse_verdict(output):
+    """Parse the verdict marker from an agent's output.
+
+    The marker must be the last non-trivial line (trailing blank lines, code
+    fences or horizontal rules are ignored), so content after the agent's own
+    verdict -- for example a line quoted from the diff -- cannot override it.
+    Returns ``"passed"`` or ``"failed"``, or ``None`` when the final line is not
+    a verdict marker (or there is no output).
+    """
+    line = _last_content_line(output)
+    if line is None:
+        return None
+    match = _VERDICT_LINE_RE.fullmatch(line)
+    if not match:
+        return None
+    return "passed" if match.group(1).upper() == "PASS" else "failed"
+
 
 _active_lock = threading.Lock()
 _active_prs = set()
@@ -200,7 +258,7 @@ def build_prompt(pr, base_ref, settings=None):
     result = prompt_template(settings)
     for key, value in values.items():
         result = result.replace("{" + key + "}", str(value))
-    return result
+    return result + VERDICT_INSTRUCTION
 
 
 def start_review(pr, agent_id, model=None, settings=None):
@@ -257,7 +315,14 @@ def _run_review(review_id, pr, agent_id, model, settings):
             stderr = _redact((proc.stderr or "").strip(), token)
 
             if proc.returncode == 0:
-                finish("done", output=output, error=stderr or None)
+                # A completed review always carries a verdict: the parsed marker,
+                # or 'unknown' when the agent did not emit one.
+                finish(
+                    "done",
+                    output=output,
+                    error=stderr or None,
+                    verdict=parse_verdict(output) or "unknown",
+                )
             else:
                 finish(
                     "error",

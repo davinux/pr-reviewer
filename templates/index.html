@@ -171,6 +171,10 @@
             animation: reviewed-pulse 1.4s ease-in-out infinite;
         }
         @keyframes reviewed-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+        .reviewed-verdict { font-weight: 600; }
+        .reviewed-verdict.verdict-passed { color: var(--app-add); }
+        .reviewed-verdict.verdict-failed { color: var(--app-del); }
+        .reviewed-verdict.verdict-unknown { color: var(--app-muted); }
 
         @media (max-width: 767.98px) {
             .layout { flex-direction: column; }
@@ -269,7 +273,7 @@
                         <span class="reviewed-dot status-{{ item.status or 'pending' }}"></span>
                         <span class="reviewed-main">
                             <span class="reviewed-title">#{{ item.number }} {{ item.title }}</span>
-                            <span class="reviewed-sub muted">{{ item.full_name }} · {{ item.status_label }}</span>
+                            <span class="reviewed-sub muted">{{ item.full_name }} · {{ item.status_label }}{% if item.verdict_label %} · <span class="reviewed-verdict verdict-{{ item.verdict }}">{{ item.verdict_label }}</span>{% endif %}</span>
                         </span>
                     </a>
                     <button type="button" class="repo-remove reviewed-remove"
@@ -685,6 +689,27 @@
                                            value="{{ settings.port }}">
                                 </div>
                             </div>
+                            <hr>
+                            <h6>API</h6>
+                            <div class="mb-3">
+                                <label class="form-label">API token <span class="muted">(optional)</span></label>
+                                <div class="input-group">
+                                    <input type="password" id="apiTokenInput" class="form-control"
+                                           placeholder="{{ '•••••••• (saved)' if settings.api_token else 'leave empty for an open API' }}">
+                                    <button class="btn btn-outline-secondary" type="button"
+                                            id="apiTokenClearBtn" onclick="clearApiToken()"
+                                            {% if not settings.api_token %}disabled{% endif %}>Clear</button>
+                                </div>
+                                <div class="form-text">
+                                    Protects the read-only <code>/api/v1</code> endpoints. When set, callers
+                                    must send it as <code>Authorization: Bearer &lt;token&gt;</code> or the
+                                    <code>X-API-Token</code> header. Interactive docs:
+                                    <a href="/api/docs" target="_blank" rel="noopener">/api/docs</a>.
+                                    <strong>This token protects only <code>/api/v1</code></strong> — the rest
+                                    of the app (settings, sync, reviews) stays open, so do not expose it to a
+                                    network without separate protection.
+                                </div>
+                            </div>
                             <div class="alert alert-warning py-2 mb-0">
                                 Changes to the bind host and port take effect after restarting the app.
                             </div>
@@ -847,6 +872,24 @@
 
         function promptInput() {
             return document.getElementById('promptInput');
+        }
+
+        // The API token is a password field, so an empty value on load means
+        // "unchanged". A dedicated clear control opts into removing it.
+        let apiTokenCleared = false;
+
+        function clearApiToken() {
+            const input = document.getElementById('apiTokenInput');
+            const btn = document.getElementById('apiTokenClearBtn');
+            apiTokenCleared = true;
+            if (input) {
+                input.value = '';
+                input.disabled = true;
+            }
+            if (btn) {
+                btn.textContent = 'Will be cleared';
+                btn.disabled = true;
+            }
         }
 
         function resetPrompt() {
@@ -1150,6 +1193,9 @@
             if (githubToken) payload.github_token = githubToken;
             const gitlabToken = fieldValue('gitlabTokenInput');
             if (gitlabToken) payload.gitlab_token = gitlabToken;
+            const apiToken = fieldValue('apiTokenInput');
+            if (apiTokenCleared) payload.api_token = '';
+            else if (apiToken) payload.api_token = apiToken;
 
             const status = document.getElementById('settingsStatus');
             status.textContent = 'Saving…';
@@ -1271,6 +1317,10 @@
         function reviewedItemHtml(item) {
             const status = item.status || 'pending';
             const label = item.status_label || 'Reviewed';
+            const verdict = item.verdict_label
+                ? ' · <span class="reviewed-verdict verdict-' + escapeHtml(item.verdict || 'unknown')
+                    + '">' + escapeHtml(item.verdict_label) + '</span>'
+                : '';
             const title = item.full_name + ' #' + item.number + ' — ' + (item.title || '');
             return '<div class="reviewed-item" data-pr-id="' + item.pr_id + '">'
                 + '<a class="reviewed-link" href="/pr/' + item.pr_id + '" title="' + escapeHtml(title) + '">'
@@ -1279,7 +1329,7 @@
                 + '<span class="reviewed-title">#' + item.number + ' '
                 + escapeHtml(item.title || '') + '</span>'
                 + '<span class="reviewed-sub muted">' + escapeHtml(item.full_name || '')
-                + ' · ' + escapeHtml(label) + '</span>'
+                + ' · ' + escapeHtml(label) + verdict + '</span>'
                 + '</span></a>'
                 + '<button type="button" class="repo-remove reviewed-remove" '
                 + 'title="Remove from AI Reviewed list">&times;</button>'
@@ -1303,7 +1353,7 @@
                 const res = await fetch('/api/reviewed');
                 const data = await res.json();
                 const items = data.reviewed || [];
-                const signature = items.map(i => i.pr_id + ':' + (i.status || '')).join('|');
+                const signature = items.map(i => i.pr_id + ':' + (i.status || '') + ':' + (i.verdict || '')).join('|');
                 if (signature === reviewedSignature) return;
                 reviewedSignature = signature;
                 list.innerHTML = items.map(reviewedItemHtml).join('');
