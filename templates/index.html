@@ -241,7 +241,7 @@
                         <span class="count-badge">{{ repo.open_count }}</span>
                     </a>
                     <button class="repo-watch {% if repo.watch %}active{% endif %}"
-                            title="{{ 'Watching for new PRs — click to stop' if repo.watch else 'Watch this repo for new PRs' }}"
+                            title="{{ 'Watching for new PRs (auto-review) — click to stop' if repo.watch else 'Watch this repo: notify and auto-review new PRs' }}"
                             onclick="toggleWatch('{{ repo.slug }}', {{ 'false' if repo.watch else 'true' }})">
                         {{ '🔔' if repo.watch else '🔕' }}
                     </button>
@@ -705,8 +705,9 @@
                             </div>
                             <div class="alert alert-info py-2 mb-0">
                                 Click the bell (🔔) next to a repository in the sidebar to watch it for
-                                new pull/merge requests. New requests show a notification here and play
-                                a short sound. Watching is off by default and per repository.
+                                new pull/merge requests. New requests show a notification, play a short
+                                sound, and are reviewed automatically with the repository's settings.
+                                Watching is off by default and per repository.
                             </div>
                         </div>
                     </div>

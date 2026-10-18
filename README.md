@@ -7,9 +7,10 @@ out the request, and runs an installed agent CLI
 ([opencode](https://opencode.ai), `pi`, Claude Code, GitHub Copilot, or a custom
 command) to produce a review you can read in the browser.
 
-There is no automatic review: reviews run only when you ask for them. Data stays
-on your machine except the GitHub/GitLab API calls and whatever your chosen
-agent does.
+There are no automatic reviews by default: reviews run only when you ask for
+them. Watching a repository is the exception — new requests there are reviewed
+automatically (see *Watching for new pull requests*). Data stays on your machine
+except the GitHub/GitLab API calls and whatever your chosen agent does.
 
 ## Features
 
@@ -41,7 +42,8 @@ agent does.
 - **Sync on demand** — a button fetches requests from the hosts when asked,
   including their current open/closed/merged state.
 - **Watch for new PRs** — optionally watch individual repositories; new
-  pull/merge requests show a notification and play a short sound.
+  pull/merge requests show a notification, play a short sound, and are reviewed
+  automatically.
 - **Light / dark theme** — a toggle in the navbar; it defaults to your system
   preference and remembers your choice.
 - **Resizable sidebar** — drag the divider beside the sidebar to widen or narrow
@@ -120,8 +122,8 @@ without a pid file — it looks for a Python process whose command line referenc
 ### Tests
 
 A small `unittest` suite covers the per-repository settings (parsing, the
-inherit/override/clear round trip, multi-host lookups and input validation). Run
-it with:
+inherit/override/clear round trip, multi-host lookups and input validation) and
+the automatic review trigger for watched repositories. Run it with:
 
 ```bash
 python3 -m unittest discover -s tests
@@ -176,18 +178,29 @@ alerted about new ones:
    requests it finds.
 3. When a new request appears in a watched repository, the dashboard shows a
    toast linking to it and plays a short chime.
+4. Watching also **starts a review automatically** for each new open request,
+   using the repository's own settings (agent, model and limits) or the global
+   ones. The review appears in the **AI Reviewed** list while it runs.
 
 Notes:
 
 - A repository's **first** sync only establishes a baseline — the requests that
-  already existed are stored without notifying, so you are not flooded when you
-  enable watching.
-- Only **open** requests raise a notification. Closed and merged requests are
-  still stored so their status stays accurate, but they never alert.
+  already existed are stored without notifying or reviewing, so you are not
+  flooded when you enable watching.
+- Only **open** requests are announced and reviewed. Closed and merged requests
+  are still stored so their status stays accurate, but they never alert or
+  trigger a review.
+- Automatic reviews need an agent that can actually run: the repository's
+  configured agent, or the first installed one. When none is available, watching
+  still notifies, but nothing is reviewed.
+- Reviews for the same repository run one request at a time, so a burst of new
+  requests is queued rather than checking out the same workspace concurrently.
 - Browsers block sound until you interact with the page. Click anywhere once and
   the notification chime will play for subsequent new requests.
 - The background watcher only polls watched repositories; unwatched ones are
   untouched until you sync manually.
+- To stop automatic reviews, click the bell again to unwatch the repository.
+  Reviews you already started keep running.
 
 ## Tracking AI-reviewed requests
 
@@ -389,7 +402,7 @@ backfilled). `data/` is gitignored. To reset, stop the app and delete the folder
 | --- | --- | --- |
 | `GET` | `/` | Dashboard. Optional `?repo=<slug>` and `?state=open\|closed\|merged\|all`. |
 | `GET` | `/pr/<id>` | Request detail page with the review panel. |
-| `POST` | `/api/sync` | Fetch requests (open, closed and merged) from every repo now. |
+| `POST` | `/api/sync` | Fetch requests (open, closed and merged) from every repo now; new open requests in watched repos are reviewed automatically. |
 | `GET` | `/api/prs` | Stored requests (optional `?repo=<slug>&state=<state>`). |
 | `GET` | `/api/pr/<id>` | One stored request as JSON. |
 | `GET` | `/api/pr/<id>/commits` | Commits in the request (live from the host). |
@@ -423,7 +436,8 @@ pr-reviewer/
 ├── reviewer.py            # Workspace checkout + review orchestration
 ├── requirements.txt
 ├── tests/
-│   └── test_repo_settings.py  # Per-repository settings tests
+│   ├── test_repo_settings.py  # Per-repository settings tests
+│   └── test_auto_review.py    # Automatic review of watched repos
 ├── scripts/
 │   ├── start.sh           # Start the server in the background
 │   ├── stop.sh            # Stop it
