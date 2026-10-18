@@ -23,7 +23,7 @@ Single project — modules at the repository root, tests under `tests/`.
 
 ## Phase 1: Setup
 
-- [ ] T001 Create `specs/009-re-review-on-new-commits/` with `spec.md` and `plan.md` (done)
+- [x] T001 Create `specs/009-re-review-on-new-commits/` with `spec.md` and `plan.md` (done)
 
 ---
 
@@ -31,10 +31,10 @@ Single project — modules at the repository root, tests under `tests/`.
 
 **Purpose**: The head-commit baseline every story depends on.
 
-- [ ] T002 [P] Add `head_sha` to the provider request entry in `providers.py` (`_github_entry` from `pull.head.sha`, `_gitlab_entry` from `mr["sha"]`)
-- [ ] T003 [P] Add `head_sha` columns in `storage.py`: `pull_requests` (SCHEMA + `_EXTRA_PR_COLUMNS`) and `reviews` (SCHEMA + `_EXTRA_REVIEW_COLUMNS`)
-- [ ] T004 [US1] Persist and expose `head_sha` in `storage.save_pr`/`_pr_dict` and `storage.create_review`/`_review_dict`
-- [ ] T005 [US1] Record the head a review starts against in `reviewer.start_review` (`create_review(..., head_sha=pr.get("head_sha"))`)
+- [x] T002 [P] Add `head_sha` to the provider request entry in `providers.py` (`_github_entry` from `pull.head.sha`, `_gitlab_entry` from `mr["sha"]`)
+- [x] T003 [P] Add `head_sha` columns in `storage.py`: `pull_requests` (SCHEMA + `_EXTRA_PR_COLUMNS`) and `reviews` (SCHEMA + `_EXTRA_REVIEW_COLUMNS`)
+- [x] T004 [US1] Persist and expose `head_sha` in `storage.save_pr`/`_pr_dict` and `storage.create_review`/`_review_dict`
+- [x] T005 [US1] Record the head a review starts against in `reviewer.start_review` (`create_review(..., head_sha=pr.get("head_sha"))`)
 
 **Checkpoint**: a review now stores its baseline head; the sync can compare.
 
@@ -50,12 +50,12 @@ SHA, and confirm exactly one review starts.
 
 ### Tests for User Story 1
 
-- [ ] T006 [P] [US1] In `tests/test_auto_review.py`, add `head_sha` to the `_pr` helper and a helper that stores a request with a completed review at a given head
-- [ ] T007 [US1] Test: new head triggers one re-review; unchanged head triggers none; the sync payload counts it in `auto_reviewed`; no notification is created
+- [x] T006 [P] [US1] In `tests/test_auto_review.py`, add `head_sha` to the `_pr` helper and a helper that stores a request with a completed review at a given head
+- [x] T007 [US1] Test: new head triggers one re-review; unchanged head triggers none; the sync payload counts it in `auto_reviewed`; no notification is created
 
 ### Implementation for User Story 1
 
-- [ ] T008 [US1] In `app.py:sync_repos`, for existing open requests in watched repos, compare the latest review's head with the entry's head and queue a re-review via `start_auto_reviews`
+- [x] T008 [US1] In `app.py:sync_repos`, for existing open requests in watched repos, compare the latest review's head with the entry's head and queue a re-review via `start_auto_reviews`
 
 **Checkpoint**: User Story 1 works on its own.
 
@@ -67,8 +67,8 @@ SHA, and confirm exactly one review starts.
 
 **Independent Test**: Block each condition and confirm zero re-reviews.
 
-- [ ] T009 [US2] Tests in `tests/test_auto_review.py`: unwatched repo, closed/merged request, no prior review, prior review with no head, and a request already under review all yield no re-review
-- [ ] T010 [US2] Ensure the guards live in `app.py:sync_repos` (watch + open + prior review with head + running-review skip in `start_auto_reviews`)
+- [x] T009 [US2] Tests in `tests/test_auto_review.py`: unwatched repo, closed/merged request, no prior review, prior review with no head, and a request already under review all yield no re-review
+- [x] T010 [US2] Ensure the guards live in `app.py:sync_repos` (watch + open + prior review with head + running-review skip in `start_auto_reviews`)
 
 **Checkpoint**: User Stories 1 and 2 both hold.
 
@@ -80,8 +80,8 @@ SHA, and confirm exactly one review starts.
 
 **Independent Test**: Watch a repo → its requests show 🔔; unwatch → they do not.
 
-- [ ] T011 [US3] Pass `watched_slugs` to the template in `app.py:index`
-- [ ] T012 [US3] Render the 🔔 on watched request rows in `templates/index.html`
+- [x] T011 [US3] Pass `watched_slugs` to the template in `app.py:index`
+- [x] T012 [US3] Render the 🔔 on watched request rows in `templates/index.html`
 
 **Checkpoint**: All three stories work.
 
@@ -89,9 +89,9 @@ SHA, and confirm exactly one review starts.
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T013 [P] Document re-review-on-new-commits in `README.md`
-- [ ] T014 Update the spec index in `specs/README.md` and set the feature status to `Implemented`
-- [ ] T015 Run the full suite: `python3 -m unittest discover -s tests`
+- [x] T013 [P] Document re-review-on-new-commits in `README.md`
+- [x] T014 Update the spec index in `specs/README.md` and set the feature status to `Implemented`
+- [x] T015 Run the full suite: `python3 -m unittest discover -s tests`
 
 ---
 

@@ -271,7 +271,7 @@ def _record_head_sha(review_id, workspace, token=None):
     """
     try:
         sha = _git(["rev-parse", "HEAD"], cwd=workspace, token=token).strip()
-    except RuntimeError:
+    except (RuntimeError, subprocess.TimeoutExpired, OSError):
         return
     if sha:
         storage.update_review(review_id, head_sha=sha)

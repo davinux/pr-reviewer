@@ -11,6 +11,7 @@ Run with: ``python3 -m unittest discover -s tests``
 import atexit
 import os
 import shutil
+import sqlite3
 import tempfile
 import unittest
 from unittest import mock
@@ -160,6 +161,14 @@ class AutoReviewTest(unittest.TestCase):
         self.assertEqual(payload["auto_reviewed"], 1)
         self.assertEqual([c["pr_id"] for c in calls], [1])
 
+    def test_new_commits_are_detected_without_an_updated_at_change(self):
+        # Head comparison, not updated_at, is what triggers: same timestamp here.
+        self._add_repo(watch=True)
+        self._store_reviewed(1, 1, head_sha="aaa")
+        payload, calls = self._run_sync([_pr(1, 1, head_sha="bbb")])
+        self.assertEqual(payload["auto_reviewed"], 1)
+        self.assertEqual([c["pr_id"] for c in calls], [1])
+
     def test_unchanged_head_is_not_reviewed_again(self):
         self._add_repo(watch=True)
         self._store_reviewed(1, 1, head_sha="aaa")
@@ -277,6 +286,44 @@ class AutoReviewTest(unittest.TestCase):
         with mock.patch.object(reviewer, "_git", lambda *a, **k: "realhead\n"):
             reviewer._record_head_sha(review_id, "/tmp/ws")
         self.assertEqual(storage.get_review(review_id)["head_sha"], "realhead")
+
+    # -- the request-list watch indicator ---------------------------------- #
+    def test_watched_repo_marks_its_request_rows(self):
+        self._add_repo(watch=True)
+        storage.save_pr(_pr(1, 1))
+        html = app_module.app.test_client().get("/").get_data(as_text=True)
+        self.assertIn('class="watch-flag', html)
+
+    def test_unwatched_repo_has_no_watch_marker(self):
+        self._add_repo(watch=False)
+        storage.save_pr(_pr(1, 1))
+        html = app_module.app.test_client().get("/").get_data(as_text=True)
+        self.assertNotIn('class="watch-flag', html)
+
+    # -- the head columns migrate with the rest of storage ----------------- #
+    def test_head_columns_exist(self):
+        with storage.get_conn() as conn:
+            pr_columns = {row["name"] for row in conn.execute("PRAGMA table_info(pull_requests)")}
+            review_columns = {row["name"] for row in conn.execute("PRAGMA table_info(reviews)")}
+        self.assertIn("head_sha", pr_columns)
+        self.assertIn("head_sha", review_columns)
+
+    @unittest.skipIf(
+        sqlite3.sqlite_version_info < (3, 35, 0),
+        "ALTER TABLE ... DROP COLUMN requires SQLite 3.35+",
+    )
+    def test_missing_head_columns_are_added_on_start(self):
+        # Simulate an older database, then confirm init_db heals it.
+        with storage.get_conn() as conn:
+            conn.execute("ALTER TABLE pull_requests DROP COLUMN head_sha")
+            conn.execute("ALTER TABLE reviews DROP COLUMN head_sha")
+        storage._initialized = False
+        storage.init_db()
+        with storage.get_conn() as conn:
+            pr_columns = {row["name"] for row in conn.execute("PRAGMA table_info(pull_requests)")}
+            review_columns = {row["name"] for row in conn.execute("PRAGMA table_info(reviews)")}
+        self.assertIn("head_sha", pr_columns)
+        self.assertIn("head_sha", review_columns)
 
     # -- per-repository workspace lock ------------------------------------ #
     def test_workspace_lock_is_per_slug(self):

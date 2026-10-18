@@ -343,29 +343,32 @@ def sync_repos(only_watched=False):
                     continue
                 is_new = entry["id"] not in known
                 prev_state = known_states.get(entry["id"])
+                # ``updated_at`` only decides whether comments need re-fetching;
+                # re-review detection compares head commits directly, so it does
+                # not depend on the provider bumping that timestamp.
                 if is_new or known.get(entry["id"]) != entry.get("updated_at"):
                     comments = provider.fetch_comments(repo, entry["number"], token, settings)
                     storage.save_pr(entry, comments)
-                    if is_new:
-                        new_prs += 1
-                        # Only alert and auto-review requests that are actually
-                        # open; a first fetch of a repo's history surfaces
-                        # closed and merged requests too, and those are not news.
-                        if repo["watch"] and not first_sync and entry.get("state") == "open":
-                            notifications.append(entry)
-                            auto_reviews.append((entry["id"], repo))
-                    elif (
-                        repo["watch"]
-                        and not first_sync
-                        and entry.get("state") == "open"
-                        and _has_new_commits(storage.latest_review(entry["id"]), entry)
-                    ):
-                        # A watched request we already reviewed gained commits:
-                        # review the new head again. It is not news, so it is not
-                        # announced.
-                        auto_reviews.append((entry["id"], repo))
                 else:
                     storage.save_pr(entry)
+
+                if is_new:
+                    new_prs += 1
+                    # Only alert and auto-review requests that are actually
+                    # open; a first fetch of a repo's history surfaces closed and
+                    # merged requests too, and those are not news.
+                    if repo["watch"] and not first_sync and entry.get("state") == "open":
+                        notifications.append(entry)
+                        auto_reviews.append((entry["id"], repo))
+                elif (
+                    repo["watch"]
+                    and not first_sync
+                    and entry.get("state") == "open"
+                    and _has_new_commits(storage.latest_review(entry["id"]), entry)
+                ):
+                    # A watched request we already reviewed gained commits: review
+                    # the new head again. It is not news, so it is not announced.
+                    auto_reviews.append((entry["id"], repo))
                 # A request that just finished (open -> closed/merged) leaves the
                 # "AI Reviewed" list. Only the transition counts, so a review
                 # started on an already-finished request is not hidden.

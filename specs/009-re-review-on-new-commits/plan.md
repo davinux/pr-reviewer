@@ -28,8 +28,8 @@ indicator so the behaviour is discoverable.
 **Project Type**: Single-project web application
 
 **Performance Goals**: No extra provider calls; the head comparison is in-memory
-over entries the sync already fetched plus one lookup of the request's latest
-review, and only for requests whose `updated_at` moved.
+over entries the sync already fetched plus one indexed lookup of the request's
+latest review for each open request in a watched repository.
 
 **Constraints**: No new services or build step; no new settings.
 
@@ -94,13 +94,15 @@ existing watch-and-auto-review feature is split.
     baseline".
 - **Reviewer**: `start_review` passes `pr.get("head_sha")` into `create_review`,
   so every new review records its baseline head.
-- **Sync trigger** (`sync_repos`): for an existing request whose stored
-  `updated_at` changed (so it was re-fetched), when the repository is watched,
-  the request is open, and the latest review's recorded head is a non-empty
-  value that differs from the entry's head, queue `(pr_id, repo)` through
-  `start_auto_reviews`. New requests keep their existing path
-  (notification + review); re-reviews never notify. `start_auto_reviews`
-  already skips requests with a running review and with no usable agent.
+- **Sync trigger** (`sync_repos`): for an existing request, when the repository
+  is watched, the request is open, and the latest review's recorded head is a
+  non-empty value that differs from the entry's head, queue `(pr_id, repo)`
+  through `start_auto_reviews`. The head comparison is deliberately independent
+  of `updated_at`, which only decides whether comments are re-fetched, so a
+  provider that reports a new head without bumping the timestamp still triggers.
+  New requests keep their existing path (notification + review); re-reviews
+  never notify. `start_auto_reviews` already skips requests with a running
+  review and with no usable agent.
 - **UI**: pass `watched_slugs` to `index.html`; render the 🔔 next to a request
   whose slug is watched.
 
