@@ -53,6 +53,9 @@ request would be unusable.
    request, **Then** the second is refused as a conflict.
 3. **Given** a review that times out, **When** the timeout elapses, **Then** it
    ends as `error` with a clear message.
+4. **Given** an agent that exits non-zero *after* emitting a verdict marker
+   (for example a non-fatal tool failure), **When** the run finishes, **Then**
+   the review is recorded as `done` with that verdict, not `error`.
 
 ---
 
@@ -84,6 +87,8 @@ prompt; confirm the head ref was checked out and the prompt rendered.
   stored or shown.
 - The base branch fetch is best-effort; the head ref is what matters.
 - Different repositories review in parallel; the same repository serialises.
+- An agent may exit non-zero after printing its review (a non-fatal tool error);
+  the trailing verdict marker decides that the review completed.
 
 ## Requirements *(mandatory)*
 
@@ -152,6 +157,7 @@ prompt; confirm the head ref was checked out and the prompt rendered.
   `templates/pr_detail.html`.
 - **Tests**: exercised indirectly by `tests/test_auto_review.py` (review start,
   per-slug lock) and `tests/test_repo_settings.py` (effective settings feed the
-  review).
+  review); `tests/test_reviewer.py` covers the `done`/`error` decision, including
+  a non-zero exit that still carries a verdict.
 - **Known limitations**: reviews are synchronous inside their thread (one agent
   process at a time per request); there is no cancellation beyond the timeout.
