@@ -261,6 +261,22 @@ def build_prompt(pr, base_ref, settings=None):
     return result + VERDICT_INSTRUCTION
 
 
+def _record_head_sha(review_id, workspace, token=None):
+    """Record the commit a review actually ran against.
+
+    The head stored on the request can lag the remote when commits are pushed
+    after the last sync; reading the checked-out commit keeps the recorded
+    baseline exact, so a later sync does not mistake an already-reviewed commit
+    for new work. Best-effort: a failure leaves the value recorded at creation.
+    """
+    try:
+        sha = _git(["rev-parse", "HEAD"], cwd=workspace, token=token).strip()
+    except RuntimeError:
+        return
+    if sha:
+        storage.update_review(review_id, head_sha=sha)
+
+
 def start_review(pr, agent_id, model=None, settings=None):
     """Create a review row and run it in the background. Returns the review id."""
     settings = settings or storage.load_settings()
@@ -273,7 +289,8 @@ def start_review(pr, agent_id, model=None, settings=None):
 
     prompt = build_prompt(pr, pr.get("base_ref") or "main", settings)
     review_id = storage.create_review(
-        pr["id"], pr.get("slug") or pr["repo"], pr["number"], agent_id, model, prompt
+        pr["id"], pr.get("slug") or pr["repo"], pr["number"], agent_id, model, prompt,
+        head_sha=pr.get("head_sha"),
     )
     thread = threading.Thread(
         target=_run_review,
@@ -300,6 +317,7 @@ def _run_review(review_id, pr, agent_id, model, settings):
             storage.update_review(review_id, status="preparing")
             workspace = prepare_workspace(repo, pr, token, settings)
             storage.update_review(review_id, workspace=workspace)
+            _record_head_sha(review_id, workspace, token)
 
             prompt = build_prompt(pr, pr.get("base_ref") or "main", settings)
             command, error = agents.resolve_command(agent_id, prompt, model, settings)

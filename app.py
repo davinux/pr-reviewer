@@ -253,17 +253,18 @@ def auto_review_agent(settings):
     return installed[0]["id"] if installed else None
 
 
-def start_auto_reviews(new_requests, settings):
-    """Start a review for each request with watching turned on.
+def start_auto_reviews(requests, settings):
+    """Start a review for each request in a watched repository.
 
-    ``new_requests`` is a list of ``(pr_id, repo)`` pairs for requests that just
-    appeared in a watched repository. Reviews run in the background like manual
-    ones, using each repository's effective settings (its own overrides, or the
-    global ones). Returns the number of reviews queued (requests without a
-    usable agent, or with a review already running, are skipped).
+    ``requests`` is a list of ``(pr_id, repo)`` pairs the sync decided to
+    review: a brand-new open request, or a previously reviewed one whose head
+    gained commits since its latest review. Reviews run in the background like
+    manual ones, using each repository's effective settings (its own overrides,
+    or the global ones). Returns the number of reviews queued (requests without
+    a usable agent, or with a review already running, are skipped).
     """
     started = 0
-    for pr_id, repo in new_requests:
+    for pr_id, repo in requests:
         pr = storage.get_pr(pr_id)
         if not pr:
             continue
@@ -280,6 +281,20 @@ def start_auto_reviews(new_requests, settings):
     return started
 
 
+def _has_new_commits(previous_review, entry):
+    """True when a request's head moved on since its latest review.
+
+    Both sides must carry a head commit: a review that predates head tracking
+    (or a provider that reports none) has no baseline, so nothing is triggered
+    rather than guessed at.
+    """
+    if not previous_review:
+        return False
+    reviewed = (previous_review.get("head_sha") or "").strip()
+    current = (entry.get("head_sha") or "").strip()
+    return bool(reviewed) and bool(current) and reviewed != current
+
+
 def sync_repos(only_watched=False):
     """Fetch pull/merge requests from every repository's provider.
 
@@ -288,6 +303,9 @@ def sync_repos(only_watched=False):
     New requests in a *watched* repository are queued as notifications and, for
     open ones, a review is started automatically -- unless the repository is
     being synced for the very first time (everything would look new then).
+    A previously reviewed open request in a watched repository is reviewed again
+    when its head commit differs from the one its latest review ran against; that
+    is not news, so it is never announced.
     Reviewed requests that change from open to closed or merged are archived out
     of the "AI Reviewed" sidebar list.
     Returns the sync summary; when new watched requests were found,
@@ -336,6 +354,16 @@ def sync_repos(only_watched=False):
                         if repo["watch"] and not first_sync and entry.get("state") == "open":
                             notifications.append(entry)
                             auto_reviews.append((entry["id"], repo))
+                    elif (
+                        repo["watch"]
+                        and not first_sync
+                        and entry.get("state") == "open"
+                        and _has_new_commits(storage.latest_review(entry["id"]), entry)
+                    ):
+                        # A watched request we already reviewed gained commits:
+                        # review the new head again. It is not news, so it is not
+                        # announced.
+                        auto_reviews.append((entry["id"], repo))
                 else:
                     storage.save_pr(entry)
                 # A request that just finished (open -> closed/merged) leaves the
@@ -438,6 +466,7 @@ def index():
         state_summary=_state_summary(pr_counts[state], pr_counts["all"], state),
         pr_counts=pr_counts,
         pr_data=storage.list_prs(selected_slug, state),
+        watched_slugs={r["slug"] for r in repos if r.get("watch")},
         total_prs=storage.count_prs(),
         open_prs=storage.count_prs(state="open"),
         reviewed=reviewed_prs_payload(),
