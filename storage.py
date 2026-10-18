@@ -378,28 +378,26 @@ def list_repo_slugs():
 
 
 def get_repo(slug):
+    """One repository by its unique slug (``<host>/<owner>/<repo>``)."""
     with get_conn() as conn:
         row = conn.execute(
             "SELECT full_name, provider, host, slug, watch, settings "
-            "FROM repos WHERE slug = ? OR full_name = ?",
-            (slug, slug),
+            "FROM repos WHERE slug = ?",
+            (slug,),
         ).fetchone()
     return _repo_dict(row) if row else None
 
 
-def repo_settings(slug):
-    """The raw per-repository overrides (empty dict when there are none)."""
-    repo = get_repo(slug)
-    return dict(repo.get("settings") or {}) if repo else None
-
-
 def set_repo_settings(slug, overrides):
-    """Replace a repository's settings overrides. Returns True if it existed."""
+    """Replace one repository's settings overrides. Returns True if it existed.
+
+    Matches by slug only: a bare ``owner/repo`` is not unique, since the same
+    path may exist on two hosts.
+    """
     payload = json.dumps(overrides or {})
     with get_conn() as conn:
         cur = conn.execute(
-            "UPDATE repos SET settings = ? WHERE slug = ? OR full_name = ?",
-            (payload, slug, slug),
+            "UPDATE repos SET settings = ? WHERE slug = ?", (payload, slug)
         )
         return cur.rowcount > 0
 

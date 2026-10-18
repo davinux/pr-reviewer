@@ -117,6 +117,16 @@ without a pid file — it looks for a Python process whose command line referenc
 > python3 app.py
 > ```
 
+### Tests
+
+A small `unittest` suite covers the per-repository settings (parsing, the
+inherit/override/clear round trip, multi-host lookups and input validation). Run
+it with:
+
+```bash
+python3 -m unittest discover -s tests
+```
+
 ## Adding repositories
 
 In the sidebar, choose **GitHub** or **GitLab**, then enter a repository. These
@@ -312,7 +322,13 @@ A field is only stored when it differs from the global value: leave it empty (or
 equal to the global value) and the repository inherits the global setting. The
 dialog shows the global value as a hint and offers **Use global** and
 **Built-in default** shortcuts for the prompt. Overrides are stored in the
-`settings` column of the `repos` table.
+`settings` column of the `repos` table. Invalid input (a non-numeric limit or an
+unknown agent) is rejected with an error, and the review timeout is floored at
+1 second.
+
+Note that choosing the **Custom command** agent for a repository still uses the
+global **Custom agent command**; only the choice of agent is per repository, not
+the command template.
 
 ### Settings file
 
@@ -406,6 +422,8 @@ pr-reviewer/
 ├── agents.py              # Agent registry: detection + command templates
 ├── reviewer.py            # Workspace checkout + review orchestration
 ├── requirements.txt
+├── tests/
+│   └── test_repo_settings.py  # Per-repository settings tests
 ├── scripts/
 │   ├── start.sh           # Start the server in the background
 │   ├── stop.sh            # Stop it

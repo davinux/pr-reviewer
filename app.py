@@ -37,6 +37,9 @@ DICT_SETTINGS = ("agent_commands", "agent_binaries", "agent_model_commands")
 
 # Settings a repository may override (see ``storage.REPO_SETTINGS``).
 REPO_INT_SETTINGS = set(storage.REPO_INT_SETTINGS)
+# Floor for the numeric overrides. The review timeout must stay positive: a
+# zero would make every review for the repo time out immediately.
+REPO_INT_MIN = {"review_timeout": 1, "max_prompt_chars": 0, "max_description_chars": 0}
 
 # The watcher never polls faster than this, whatever ``watch_interval`` says.
 WATCH_MIN_INTERVAL = 15
@@ -79,28 +82,68 @@ def settings_payload():
     return settings
 
 
+def _coerce_repo_setting(key, value):
+    """Normalise one override value.
+
+    Returns ``None`` for an empty value (which means "inherit"). Raises
+    ``ValueError`` for a numeric key that is not a whole number, so the endpoint
+    can reject input the UI could not have produced instead of persisting a
+    bogus value. Numeric values are floored to a sane minimum.
+    """
+    if key in REPO_INT_SETTINGS:
+        if value in (None, ""):
+            return None
+        try:
+            number = int(str(value).strip())
+        except (TypeError, ValueError):
+            raise ValueError(f"'{key}' must be a whole number.")
+        return max(REPO_INT_MIN.get(key, 0), number)
+    return str(value).strip() or None
+
+
+def _repo_global_value(key, settings):
+    """The global value a repository inherits for ``key``.
+
+    For the prompt this is the global prompt, or the built-in one when the
+    global prompt is empty.
+    """
+    if key == "review_prompt":
+        return (settings.get("review_prompt") or reviewer.DEFAULT_REVIEW_PROMPT).strip()
+    return settings.get(key)
+
+
+def _known_agent(agent_id):
+    return agent_id == agents.CUSTOM_ID or agents.get_agent(agent_id) is not None
+
+
 def _clean_repo_overrides(data, settings):
-    """Keep only known, non-empty per-repository overrides from a request body."""
+    """Keep the known, non-empty overrides that differ from the global value.
+
+    A field equal to (or empty compared with) the global default is dropped, so
+    the repository inherits it -- matching what the dialog sends. Raises
+    ``ValueError`` for input the UI could not have produced.
+    """
     overrides = {}
     for key in storage.REPO_SETTINGS:
         if key not in data:
             continue
-        value = data[key]
-        if key in REPO_INT_SETTINGS:
-            if value not in (None, ""):
-                overrides[key] = _as_int(value, settings.get(key))
-        else:
-            text = str(value).strip()
-            if text:
-                overrides[key] = text
+        value = _coerce_repo_setting(key, data[key])
+        if value is None:
+            continue
+        if key == "default_agent" and not _known_agent(value):
+            raise ValueError(f"Unknown agent: {value}")
+        if value == _repo_global_value(key, settings):
+            continue
+        overrides[key] = value
     return overrides
 
 
 def effective_repo_settings(settings, repo):
     """Merge a repository's overrides onto the global settings.
 
-    Only the keys in ``storage.REPO_SETTINGS`` are considered, and empty
-    overrides are ignored, so clearing a field restores the global default.
+    Only the keys in ``storage.REPO_SETTINGS`` are considered, and empty or
+    unparseable overrides are ignored, so clearing a field restores the global
+    default.
     """
     if not repo:
         return settings
@@ -111,13 +154,12 @@ def effective_repo_settings(settings, repo):
     for key, value in overrides.items():
         if key not in storage.REPO_SETTINGS:
             continue
-        if key in REPO_INT_SETTINGS:
-            if value not in (None, ""):
-                merged[key] = _as_int(value, settings.get(key))
-        else:
-            text = str(value).strip()
-            if text:
-                merged[key] = text
+        try:
+            coerced = _coerce_repo_setting(key, value)
+        except ValueError:
+            continue
+        if coerced is not None:
+            merged[key] = coerced
     return merged
 
 
@@ -395,7 +437,11 @@ def api_repo_settings(slug):
 
     if request.method == "POST":
         data = request.get_json(silent=True) or {}
-        storage.set_repo_settings(slug, _clean_repo_overrides(data, settings))
+        try:
+            overrides = _clean_repo_overrides(data, settings)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        storage.set_repo_settings(slug, overrides)
         repo = storage.get_repo(slug)
 
     return jsonify(repo_settings_payload(repo, settings))

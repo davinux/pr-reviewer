@@ -245,9 +245,9 @@
                             onclick="toggleWatch('{{ repo.slug }}', {{ 'false' if repo.watch else 'true' }})">
                         {{ '🔔' if repo.watch else '🔕' }}
                     </button>
-                    <button class="repo-settings {% if repo.settings %}active{% endif %}"
-                            title="{{ 'Repository settings (customised)' if repo.settings else 'Repository settings' }}"
-                            onclick="openRepoSettings('{{ repo.slug }}')">&#9881;</button>
+                    <button type="button" class="repo-settings {% if repo.settings %}active{% endif %}"
+                            data-repo-settings="{{ repo.slug }}"
+                            title="{{ 'Repository settings (customised)' if repo.settings else 'Repository settings' }}">&#9881;</button>
                     <button class="repo-remove" title="Remove repository"
                             onclick="removeRepo('{{ repo.slug }}')">&times;</button>
                 </div>
@@ -1039,6 +1039,14 @@
             } catch (err) {
                 status.textContent = 'Could not save settings: ' + err;
             }
+        }
+
+        const repoListEl = document.getElementById('repoList');
+        if (repoListEl) {
+            repoListEl.addEventListener('click', (event) => {
+                const btn = event.target.closest('.repo-settings');
+                if (btn) openRepoSettings(btn.dataset.repoSettings);
+            });
         }
 
         async function loadModels(force) {
