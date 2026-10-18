@@ -331,15 +331,20 @@ def _run_review(review_id, pr, agent_id, model, settings):
             proc = agents.run(command, cwd=workspace, timeout=timeout)
             output = (proc.stdout or "").strip()
             stderr = _redact((proc.stderr or "").strip(), token)
+            verdict = parse_verdict(output)
 
-            if proc.returncode == 0:
+            if proc.returncode == 0 or verdict:
                 # A completed review always carries a verdict: the parsed marker,
-                # or 'unknown' when the agent did not emit one.
+                # or 'unknown' when the agent did not emit one. A verdict is
+                # proof the review finished, so a non-zero exit is not fatal when
+                # one is present: some CLIs exit non-zero after a non-fatal tool
+                # error (for example an unavailable web search) even though the
+                # agent produced its full review. The CLI's stderr is kept.
                 finish(
                     "done",
                     output=output,
                     error=stderr or None,
-                    verdict=parse_verdict(output) or "unknown",
+                    verdict=verdict or "unknown",
                 )
             else:
                 finish(

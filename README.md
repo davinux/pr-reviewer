@@ -72,6 +72,12 @@ except the GitHub/GitLab API calls and whatever your chosen agent does.
    (`REVIEW_VERDICT: PASS` or `REVIEW_VERDICT: FAIL`) that PR Reviewer parses and
    stores, so the outcome can be read by other tools (see *Review status API*).
 
+That final verdict is also how the app decides a run finished. If the agent's
+CLI exits non-zero *after* printing the review — OpenCode does this, for example,
+when its web-search tool is unavailable — the review is still saved as `done`
+with its verdict instead of being discarded as a failure. A non-zero exit with no
+verdict is still an error.
+
 ## Requirements
 
 - Python 3.9+
@@ -568,6 +574,7 @@ pr-reviewer/
 │   ├── test_repo_settings.py     # Per-repository settings tests
 │   ├── test_auto_review.py       # Automatic review of watched repos
 │   ├── test_archive_reviewed.py  # Auto-archive of reviewed requests
+│   ├── test_reviewer.py          # Review run outcome (done/error)
 │   └── test_api.py               # Review-status API, verdict and Swagger docs
 ├── scripts/
 │   ├── start.sh           # Start the server in the background
