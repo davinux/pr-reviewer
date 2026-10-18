@@ -12,6 +12,7 @@ for status and output.
 """
 
 import os
+import re
 import shlex
 import subprocess
 import threading
@@ -59,6 +60,39 @@ Produce a focused, actionable review:
 - Do NOT modify any files. This is a read-only review.
 Return the review as Markdown.
 """
+
+# Appended to every rendered review prompt -- including custom templates -- so a
+# completed review always carries a machine-readable outcome. See
+# specs/008-review-status-api. The parser tolerates Markdown around the marker and
+# takes the last occurrence, so the verdict line must come last.
+VERDICT_INSTRUCTION = """
+
+---
+Finally, end your response with a single line in exactly this format, on its own
+line, so it can be read by an automated system:
+REVIEW_VERDICT: PASS
+or
+REVIEW_VERDICT: FAIL
+Use PASS when the change is good to merge, and FAIL when it has blocking issues.
+"""
+
+# Case-insensitive so a lowercased marker still counts; ``\b`` avoids matching a
+# word such as "PASSED". The last match wins.
+_VERDICT_RE = re.compile(r"REVIEW_VERDICT:\s*(PASS|FAIL)\b", re.IGNORECASE)
+
+
+def parse_verdict(output):
+    """Parse the verdict marker from an agent's output.
+
+    Returns ``"passed"`` or ``"failed"`` for the last ``REVIEW_VERDICT`` marker
+    found, or ``None`` when the output has none (or is empty). Tolerant of
+    surrounding Markdown and code fences.
+    """
+    matches = _VERDICT_RE.findall(output or "")
+    if not matches:
+        return None
+    return "passed" if matches[-1].upper() == "PASS" else "failed"
+
 
 _active_lock = threading.Lock()
 _active_prs = set()
@@ -200,7 +234,7 @@ def build_prompt(pr, base_ref, settings=None):
     result = prompt_template(settings)
     for key, value in values.items():
         result = result.replace("{" + key + "}", str(value))
-    return result
+    return result + VERDICT_INSTRUCTION
 
 
 def start_review(pr, agent_id, model=None, settings=None):
@@ -257,7 +291,14 @@ def _run_review(review_id, pr, agent_id, model, settings):
             stderr = _redact((proc.stderr or "").strip(), token)
 
             if proc.returncode == 0:
-                finish("done", output=output, error=stderr or None)
+                # A completed review always carries a verdict: the parsed marker,
+                # or 'unknown' when the agent did not emit one.
+                finish(
+                    "done",
+                    output=output,
+                    error=stderr or None,
+                    verdict=parse_verdict(output) or "unknown",
+                )
             else:
                 finish(
                     "error",

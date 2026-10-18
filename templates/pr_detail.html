@@ -190,7 +190,10 @@
                      data-default-model="{{ settings.default_model }}">
                     <div class="panel-header d-flex justify-content-between align-items-center">
                         <span>AI Review</span>
-                        <span class="badge bg-secondary d-none" id="reviewBadge"></span>
+                        <span>
+                            <span class="badge bg-secondary d-none" id="reviewVerdict"></span>
+                            <span class="badge bg-secondary d-none" id="reviewBadge"></span>
+                        </span>
                     </div>
                     <div class="panel-body">
                         <div class="row g-2 align-items-end mb-3">
@@ -521,6 +524,19 @@
                 setProgress('Review failed.', 'error', 'bg-danger');
             } else {
                 setProgress('Queued…', 'queued', 'bg-secondary');
+            }
+
+            const verdictEl = document.getElementById('reviewVerdict');
+            if (review.verdict) {
+                verdictEl.textContent = ({ passed: 'Passed', failed: 'Needs work' }[review.verdict])
+                    || 'No verdict';
+                verdictEl.className = 'badge ms-1 '
+                    + (review.verdict === 'passed' ? 'bg-success'
+                        : review.verdict === 'failed' ? 'bg-danger' : 'bg-secondary');
+                verdictEl.classList.remove('d-none');
+            } else {
+                verdictEl.classList.add('d-none');
+                verdictEl.textContent = '';
             }
 
             renderMarkdown(document.getElementById('reviewOutput'), review.output);

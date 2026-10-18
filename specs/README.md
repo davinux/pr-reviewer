@@ -65,6 +65,7 @@ Each spec carries a status: `Draft` → `Clarified` → `Planned` → `In Progre
 | 005 | Agent review pipeline | Implemented | [spec](005-agent-review-pipeline/spec.md) |
 | 006 | AI-reviewed tracking list | Implemented | [spec](006-ai-reviewed-list/spec.md) |
 | 007 | Auto-archive reviewed requests | Implemented | [spec](007-auto-archive-reviewed/spec.md) |
+| 008 | Review status API & Swagger docs | Implemented | [spec](008-review-status-api/spec.md) |
 
 The first six specs were **retrofitted** onto features that already shipped, so
 they are the as-is baseline: each has status `Implemented` and an *Implementation
