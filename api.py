@@ -69,7 +69,12 @@ def _authorized():
     if not expected:
         return True
     given = _provided_token()
-    return bool(given) and hmac.compare_digest(given, expected)
+    if not given:
+        return False
+    # Compare bytes: ``hmac.compare_digest`` rejects ``str`` operands that are
+    # not ASCII-only, and a caller can put anything in a header. Encoding first
+    # keeps a non-ASCII token or probe a clean ``401`` instead of a ``500``.
+    return hmac.compare_digest(given.encode("utf-8"), expected.encode("utf-8"))
 
 
 def require_token(view):

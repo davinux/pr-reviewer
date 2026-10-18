@@ -166,7 +166,7 @@
           "verdict": {
             "type": "string",
             "nullable": true,
-            "enum": ["passed", "failed", "unknown"],
+            "enum": ["passed", "failed", "unknown", "null"],
             "description": "`null` while the review is running or if it errored."
           },
           "agent": { "type": "string", "nullable": true, "example": "opencode" },
@@ -193,7 +193,7 @@
           "verdict": {
             "type": "string",
             "nullable": true,
-            "enum": ["passed", "failed", "unknown"]
+            "enum": ["passed", "failed", "unknown", "null"]
           },
           "review_status": {
             "type": "string",

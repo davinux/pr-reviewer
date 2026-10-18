@@ -10,7 +10,9 @@ Run with: ``python3 -m unittest discover -s tests``
 import atexit
 import json
 import os
+import re
 import shutil
+import sqlite3
 import tempfile
 import unittest
 
@@ -305,7 +307,16 @@ class ReviewStatusApiTest(unittest.TestCase):
             self.skipTest("flask-swagger-ui is not installed")
         response = self.client.get("/api/docs/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"swagger-ui", response.data.lower())
+        body = response.get_data(as_text=True)
+        self.assertIn("swagger-ui", body.lower())
+        # Assets are served by the app itself: the only absolute URL is the local
+        # oauth2 redirect, never a remote host/CDN.
+        external = [
+            url
+            for url in re.findall(r"https?://[^\s\"'<>]+", body)
+            if not re.match(r"https?://(localhost|127\.0\.0\.1)[:/]", url)
+        ]
+        self.assertEqual(external, [], "the docs page must not load assets remotely")
 
     # -- authentication ---------------------------------------------------- #
     def _set_token(self, token):
@@ -342,6 +353,38 @@ class ReviewStatusApiTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
+    def test_wrong_x_api_token_is_rejected(self):
+        self._set_token("s3cret")
+        self.assertEqual(
+            self.client.get("/api/v1/reviews", headers={"X-API-Token": "nope"}).status_code,
+            401,
+        )
+
+    def test_non_ascii_token_is_a_clean_401(self):
+        # A Unicode probe must not crash the compare into a 500.
+        self._set_token("s3cret")
+        self._store(1, 1)
+        url = f"/api/v1/reviews/status?repo={SLUG}&number=1"
+        for headers in (
+            {"Authorization": "Bearer ünicode"},
+            {"X-API-Token": "ünicode"},
+        ):
+            response = self.client.get(url, headers=headers)
+            self.assertEqual(response.status_code, 401, headers)
+
+    def test_non_ascii_configured_token_still_works(self):
+        self._set_token("pässwörd")
+        self._store(1, 1)
+        url = f"/api/v1/reviews/status?repo={SLUG}&number=1"
+        self.assertEqual(
+            self.client.get(url, headers={"Authorization": "Bearer pässwörd"}).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.get(url, headers={"Authorization": "Bearer wrong"}).status_code,
+            401,
+        )
+
     def test_list_endpoint_is_guarded_too(self):
         self._set_token("s3cret")
         self.assertEqual(self.client.get("/api/v1/reviews").status_code, 401)
@@ -377,6 +420,10 @@ class ReviewStatusApiTest(unittest.TestCase):
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(reviews)")}
         self.assertIn("verdict", columns)
 
+    @unittest.skipIf(
+        sqlite3.sqlite_version_info < (3, 35, 0),
+        "ALTER TABLE ... DROP COLUMN requires SQLite 3.35+",
+    )
     def test_missing_verdict_column_is_added_on_start(self):
         # Simulate an older database, then confirm init_db heals it.
         with storage.get_conn() as conn:

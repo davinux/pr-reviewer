@@ -163,6 +163,27 @@ the spec.
   status/list field parity, `limit` validation, `pr_id` precedence, slug-only
   matching and clearing the token. (Nit #10.)
 
+**Checkpoint**: first review round addressed.
+
+---
+
+## Phase 9: Second review round
+
+- [x] T031 [US3] Compare the API token as UTF-8 **bytes** in `api._authorized`, so
+  a non-ASCII credential yields `401` rather than a `TypeError`/`500`. (Important
+  #1.) Add tests for a non-ASCII probe and a non-ASCII configured token.
+- [x] T032 [US1] Document the trust boundary: `passed` is the agent's opinion, not
+  a verified signal, in the README and spec (FR-016). Note the
+  trailing-prose→`unknown` caveat. (Important #2, #3.)
+- [x] T033 [P] Guard the `DROP COLUMN` migration test with a SQLite ≥ 3.35 check.
+  (Nit.)
+- [x] T034 [US3] Add a wrong `X-API-Token` test. (Nit.)
+- [x] T035 [US2] Assert in the docs test that the Swagger page loads no remote
+  asset (no external host). (Nit.)
+- [x] T036 [P] Add `"null"` to the nullable verdict enums in `openapi.json`.
+  (Nit.)
+
+**Checkpoint**: second review round addressed; 81 tests pass.
 
 ---
 

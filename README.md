@@ -243,8 +243,8 @@ Notes:
 Every completed review ends with a machine-readable verdict that the app parses
 and stores: `REVIEW_VERDICT: PASS` or `REVIEW_VERDICT: FAIL`. The app appends
 this instruction to **every** review prompt — the default one and any custom
-template — so the outcome is always available. A request's **latest** review
-decides its current verdict.
+template — and the verdict must be the **final line** of the agent's output. A
+request's **latest** review decides its current verdict.
 
 Other services can ask whether a pull/merge request passed over a small,
 read-only API:
@@ -278,9 +278,16 @@ The response reports `passed` (`true`/`false`/`null`), the `verdict`
 
 `passed` is `true` on a PASS verdict, `false` on FAIL, and `null` when nothing is
 decided yet (no review, a review still running, one that errored, or an agent
-that emitted no marker). `GET /api/v1/reviews` lists reviewed requests and can be
+that emitted no marker). Because the marker must be the **last** line, an agent
+that adds a closing remark *after* the verdict yields `unknown`; the instruction
+asks it to end there. `GET /api/v1/reviews` lists reviewed requests and can be
 filtered with `?repo=<slug>` and `?verdict=passed|failed|unknown` (`?limit=` caps
 the list).
+
+> **What `passed` means.** It is the reviewing *agent's opinion*, not a verified
+> or security-grade signal. The agent reads content the pull/merge request author
+> controls, so a crafted request can try to steer the agent or the marker. Use
+> `passed` as a convenience gate, not as the only control before a merge.
 
 Browse and try the API in the browser at **<http://localhost:5000/api/docs>**
 (Swagger UI); the OpenAPI 3 document is served at `/api/v1/openapi.json`.

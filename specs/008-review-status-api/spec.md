@@ -190,10 +190,11 @@ filtered set.
   its parameters, response schemas and the optional bearer authentication.
 - **FR-010**: When `api_token` is configured, every `/api/v1` data endpoint MUST
   require it — accepted in `Authorization: Bearer <token>` or `X-API-Token:
-  <token>` — and MUST return `401` when it is missing or wrong. The Swagger UI
-  page and the OpenAPI document MUST remain reachable without the token. The
-  token scopes to `/api/v1` only; the app MUST NOT imply it protects the other
-  (mutating) routes, and the UI MUST say so.
+  <token>` — and MUST return `401` when it is missing or wrong. A malformed or
+  non-ASCII credential (header or configured token) MUST also yield `401`, never
+  a `500`. The Swagger UI page and the OpenAPI document MUST remain reachable
+  without the token. The token scopes to `/api/v1` only; the app MUST NOT imply
+  it protects the other (mutating) routes, and the UI MUST say so.
 - **FR-011**: When `api_token` is empty (the default), the API MUST be reachable
   without authentication. A user MUST be able to clear a saved token from the UI
   to return to this state.
@@ -211,6 +212,10 @@ filtered set.
 - **FR-015**: The verdict MUST be visible in the app's own UI: the AI Reviewed
   sidebar list and the request page MUST show a passed/failed/unknown indicator,
   and `GET /api/reviewed` MUST include the verdict.
+- **FR-016**: The documentation MUST state that `passed` is the reviewing agent's
+  *opinion*, not a verified or security-grade signal, because the agent reads
+  request content the author controls; it MUST NOT be presented as a merge
+  control on its own.
 
 ### Key Entities
 
