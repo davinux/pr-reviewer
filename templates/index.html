@@ -286,6 +286,28 @@
                 Reviewed pull requests show up here. Run an agent review to track one.
             </p>
 
+            <div class="sidebar-label d-flex align-items-center justify-content-between">
+                <span>Reviews</span>
+                <span class="count-badge" id="reviewsCount">{{ recent_reviews | length }}</span>
+            </div>
+            <div class="d-grid gap-1" id="reviewHistoryList">
+                {% for item in recent_reviews %}
+                <div class="reviewed-item" data-review-id="{{ item.id }}">
+                    <a class="reviewed-link" href="/pr/{{ item.pr_id }}"
+                       title="{{ item.full_name }} #{{ item.number }} — {{ item.title }}">
+                        <span class="reviewed-dot status-{{ item.status or 'pending' }}"></span>
+                        <span class="reviewed-main">
+                            <span class="reviewed-title">#{{ item.number }} {{ item.title }}</span>
+                            <span class="reviewed-sub muted">{{ item.full_name }} · {{ item.status_label }}{% if item.verdict_label %} · <span class="reviewed-verdict verdict-{{ item.verdict }}">{{ item.verdict_label }}</span>{% endif %}</span>
+                        </span>
+                    </a>
+                </div>
+                {% endfor %}
+            </div>
+            <p class="muted small {% if recent_reviews %}d-none{% endif %}" id="reviewHistoryEmpty">
+                Reviews you run show up here with their status and verdict.
+            </p>
+
             <hr>
             <div class="sidebar-label mb-1">Agents</div>
             {% for agent in agents %}
@@ -1396,6 +1418,58 @@
 
         refreshReviewed();
         setInterval(refreshReviewed, REVIEWED_POLL_MS);
+
+        // ---- Recent reviews (sidebar) ----
+        const REVIEW_HISTORY_POLL_MS = 15000;
+        let reviewHistorySignature = null;
+
+        function reviewHistoryItemHtml(item) {
+            const status = item.status || 'pending';
+            const label = item.status_label || 'Queued';
+            const verdict = item.verdict_label
+                ? ' · <span class="reviewed-verdict verdict-' + escapeHtml(item.verdict || 'unknown')
+                    + '">' + escapeHtml(item.verdict_label) + '</span>'
+                : '';
+            const title = (item.full_name || '') + ' #' + item.number + ' — ' + (item.title || '');
+            return '<div class="reviewed-item" data-review-id="' + item.id + '">'
+                + '<a class="reviewed-link" href="/pr/' + item.pr_id + '" title="' + escapeHtml(title) + '">'
+                + '<span class="reviewed-dot status-' + status + '"></span>'
+                + '<span class="reviewed-main">'
+                + '<span class="reviewed-title">#' + item.number + ' '
+                + escapeHtml(item.title || '') + '</span>'
+                + '<span class="reviewed-sub muted">' + escapeHtml(item.full_name || '')
+                + ' · ' + escapeHtml(label) + verdict + '</span>'
+                + '</span></a></div>';
+        }
+
+        function updateReviewHistoryCount() {
+            const list = document.getElementById('reviewHistoryList');
+            const empty = document.getElementById('reviewHistoryEmpty');
+            const badge = document.getElementById('reviewsCount');
+            const count = list ? list.querySelectorAll('.reviewed-item').length : 0;
+            if (badge) badge.textContent = count;
+            if (empty) empty.classList.toggle('d-none', count > 0);
+        }
+
+        // Re-render only when the list or a review's status/verdict changed.
+        async function refreshReviewHistory() {
+            const list = document.getElementById('reviewHistoryList');
+            if (!list) return;
+            try {
+                const res = await fetch('/api/reviews');
+                const data = await res.json();
+                const items = data.reviews || [];
+                const signature = items
+                    .map(i => i.id + ':' + (i.status || '') + ':' + (i.verdict || '')).join('|');
+                if (signature === reviewHistorySignature) return;
+                reviewHistorySignature = signature;
+                list.innerHTML = items.map(reviewHistoryItemHtml).join('');
+                updateReviewHistoryCount();
+            } catch (err) { /* keep polling */ }
+        }
+
+        refreshReviewHistory();
+        setInterval(refreshReviewHistory, REVIEW_HISTORY_POLL_MS);
 
         // ---- Resizable sidebar ----
         const SIDEBAR_WIDTH_KEY = 'pr-sidebar-width';
