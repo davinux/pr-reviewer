@@ -134,6 +134,7 @@
         .diff-stat { font-size: .8rem; font-family: var(--app-mono); }
         .diff-add { color: var(--app-add); }
         .diff-del { color: var(--app-del); }
+        .watch-flag { font-size: .85em; opacity: .85; }
         table.prs td, table.prs th { vertical-align: middle; }
 
         /* AI Reviewed list */
@@ -351,6 +352,7 @@
                                 <td>
                                     <a class="pr-title" href="/pr/{{ pr.id }}">{{ pr.title }}</a>
                                     {% if pr.draft %}<span class="badge bg-secondary ms-1">Draft</span>{% endif %}
+                                    {% if pr.slug in watched_slugs %}<span class="watch-flag ms-1" title="Repository watched — new commits are reviewed automatically">🔔</span>{% endif %}
                                     {% if pr.additions is not none and pr.deletions is not none %}
                                     <span class="diff-stat ms-2">
                                         <span class="diff-add">+{{ pr.additions }}</span>

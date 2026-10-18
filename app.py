@@ -253,17 +253,18 @@ def auto_review_agent(settings):
     return installed[0]["id"] if installed else None
 
 
-def start_auto_reviews(new_requests, settings):
-    """Start a review for each request with watching turned on.
+def start_auto_reviews(requests, settings):
+    """Start a review for each request in a watched repository.
 
-    ``new_requests`` is a list of ``(pr_id, repo)`` pairs for requests that just
-    appeared in a watched repository. Reviews run in the background like manual
-    ones, using each repository's effective settings (its own overrides, or the
-    global ones). Returns the number of reviews queued (requests without a
-    usable agent, or with a review already running, are skipped).
+    ``requests`` is a list of ``(pr_id, repo)`` pairs the sync decided to
+    review: a brand-new open request, or a previously reviewed one whose head
+    gained commits since its latest review. Reviews run in the background like
+    manual ones, using each repository's effective settings (its own overrides,
+    or the global ones). Returns the number of reviews queued (requests without
+    a usable agent, or with a review already running, are skipped).
     """
     started = 0
-    for pr_id, repo in new_requests:
+    for pr_id, repo in requests:
         pr = storage.get_pr(pr_id)
         if not pr:
             continue
@@ -280,6 +281,20 @@ def start_auto_reviews(new_requests, settings):
     return started
 
 
+def _has_new_commits(previous_review, entry):
+    """True when a request's head moved on since its latest review.
+
+    Both sides must carry a head commit: a review that predates head tracking
+    (or a provider that reports none) has no baseline, so nothing is triggered
+    rather than guessed at.
+    """
+    if not previous_review:
+        return False
+    reviewed = (previous_review.get("head_sha") or "").strip()
+    current = (entry.get("head_sha") or "").strip()
+    return bool(reviewed) and bool(current) and reviewed != current
+
+
 def sync_repos(only_watched=False):
     """Fetch pull/merge requests from every repository's provider.
 
@@ -288,6 +303,9 @@ def sync_repos(only_watched=False):
     New requests in a *watched* repository are queued as notifications and, for
     open ones, a review is started automatically -- unless the repository is
     being synced for the very first time (everything would look new then).
+    A previously reviewed open request in a watched repository is reviewed again
+    when its head commit differs from the one its latest review ran against; that
+    is not news, so it is never announced.
     Reviewed requests that change from open to closed or merged are archived out
     of the "AI Reviewed" sidebar list.
     Returns the sync summary; when new watched requests were found,
@@ -325,19 +343,32 @@ def sync_repos(only_watched=False):
                     continue
                 is_new = entry["id"] not in known
                 prev_state = known_states.get(entry["id"])
+                # ``updated_at`` only decides whether comments need re-fetching;
+                # re-review detection compares head commits directly, so it does
+                # not depend on the provider bumping that timestamp.
                 if is_new or known.get(entry["id"]) != entry.get("updated_at"):
                     comments = provider.fetch_comments(repo, entry["number"], token, settings)
                     storage.save_pr(entry, comments)
-                    if is_new:
-                        new_prs += 1
-                        # Only alert and auto-review requests that are actually
-                        # open; a first fetch of a repo's history surfaces
-                        # closed and merged requests too, and those are not news.
-                        if repo["watch"] and not first_sync and entry.get("state") == "open":
-                            notifications.append(entry)
-                            auto_reviews.append((entry["id"], repo))
                 else:
                     storage.save_pr(entry)
+
+                if is_new:
+                    new_prs += 1
+                    # Only alert and auto-review requests that are actually
+                    # open; a first fetch of a repo's history surfaces closed and
+                    # merged requests too, and those are not news.
+                    if repo["watch"] and not first_sync and entry.get("state") == "open":
+                        notifications.append(entry)
+                        auto_reviews.append((entry["id"], repo))
+                elif (
+                    repo["watch"]
+                    and not first_sync
+                    and entry.get("state") == "open"
+                    and _has_new_commits(storage.latest_review(entry["id"]), entry)
+                ):
+                    # A watched request we already reviewed gained commits: review
+                    # the new head again. It is not news, so it is not announced.
+                    auto_reviews.append((entry["id"], repo))
                 # A request that just finished (open -> closed/merged) leaves the
                 # "AI Reviewed" list. Only the transition counts, so a review
                 # started on an already-finished request is not hidden.
@@ -438,6 +469,7 @@ def index():
         state_summary=_state_summary(pr_counts[state], pr_counts["all"], state),
         pr_counts=pr_counts,
         pr_data=storage.list_prs(selected_slug, state),
+        watched_slugs={r["slug"] for r in repos if r.get("watch")},
         total_prs=storage.count_prs(),
         open_prs=storage.count_prs(state="open"),
         reviewed=reviewed_prs_payload(),

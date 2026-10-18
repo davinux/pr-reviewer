@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS pull_requests (
     labels        TEXT DEFAULT '[]',
     base_ref      TEXT,
     head_ref      TEXT,
+    head_sha      TEXT,
     additions     INTEGER,
     deletions     INTEGER,
     changed_files INTEGER,
@@ -131,7 +132,8 @@ CREATE TABLE IF NOT EXISTS reviews (
     created_at  TEXT NOT NULL,
     finished_at TEXT,
     duration_ms INTEGER,
-    verdict     TEXT
+    verdict     TEXT,
+    head_sha    TEXT
 );
 
 -- Pull requests the user has cleared from the "AI Reviewed" sidebar list.
@@ -182,15 +184,18 @@ _EXTRA_PR_COLUMNS = {
     "labels": "TEXT DEFAULT '[]'",
     "base_ref": "TEXT",
     "head_ref": "TEXT",
+    "head_sha": "TEXT",
     "additions": "INTEGER",
     "deletions": "INTEGER",
     "changed_files": "INTEGER",
     "author_avatar": "TEXT",
 }
 
-# Review columns added after the first release (the parsed review verdict).
+# Review columns added after the first release: the parsed verdict and the head
+# commit the review was started against (used to spot new commits since).
 _EXTRA_REVIEW_COLUMNS = {
     "verdict": "TEXT",
+    "head_sha": "TEXT",
 }
 
 _init_lock = threading.Lock()
@@ -513,8 +518,9 @@ def save_pr(pr, comments=None):
             INSERT INTO pull_requests
                 (id, repo_id, full_name, slug, provider, host, number, title, user,
                  body, state, url, created_at, updated_at, draft, labels, base_ref,
-                 head_ref, additions, deletions, changed_files, author_avatar)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 head_ref, head_sha, additions, deletions, changed_files,
+                 author_avatar)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 title         = excluded.title,
                 body          = excluded.body,
@@ -525,6 +531,7 @@ def save_pr(pr, comments=None):
                 labels        = excluded.labels,
                 base_ref      = excluded.base_ref,
                 head_ref      = excluded.head_ref,
+                head_sha      = excluded.head_sha,
                 additions     = excluded.additions,
                 deletions     = excluded.deletions,
                 changed_files = excluded.changed_files,
@@ -534,8 +541,9 @@ def save_pr(pr, comments=None):
                 pr["id"], repo_id, pr["repo"], slug, provider, host, pr.get("number"),
                 pr.get("title"), pr.get("user"), pr.get("body"), pr.get("state"),
                 pr.get("url"), pr.get("created_at"), pr.get("updated_at"), draft,
-                labels, pr.get("base_ref"), pr.get("head_ref"), pr.get("additions"),
-                pr.get("deletions"), pr.get("changed_files"), pr.get("author_avatar"),
+                labels, pr.get("base_ref"), pr.get("head_ref"), pr.get("head_sha"),
+                pr.get("additions"), pr.get("deletions"), pr.get("changed_files"),
+                pr.get("author_avatar"),
             ),
         )
         for comment in comments or []:
@@ -696,6 +704,7 @@ def _pr_dict(row, comments):
         "labels": _load_labels(row["labels"]) if "labels" in keys else [],
         "base_ref": row["base_ref"] if "base_ref" in keys else None,
         "head_ref": row["head_ref"] if "head_ref" in keys else None,
+        "head_sha": row["head_sha"] if "head_sha" in keys else None,
         "additions": row["additions"] if "additions" in keys else None,
         "deletions": row["deletions"] if "deletions" in keys else None,
         "changed_files": row["changed_files"] if "changed_files" in keys else None,
@@ -785,18 +794,24 @@ def _notification_dict(row):
 # --------------------------------------------------------------------------- #
 REVIEW_FIELDS = {
     "status", "prompt", "command", "workspace", "output", "error",
-    "finished_at", "duration_ms", "model", "agent", "verdict",
+    "finished_at", "duration_ms", "model", "agent", "verdict", "head_sha",
 }
 
 
-def create_review(pr_id, repo, number, agent, model, prompt=None):
+def create_review(pr_id, repo, number, agent, model, prompt=None, head_sha=None):
+    """Create a pending review, recording the head commit it will run against.
+
+    ``head_sha`` is the request's head at the moment the review starts, so a
+    later sync can tell whether the request gained commits since.
+    """
     with get_conn() as conn:
         cur = conn.execute(
             """
-            INSERT INTO reviews (pr_id, repo, number, agent, model, status, prompt, created_at)
-            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+            INSERT INTO reviews
+                (pr_id, repo, number, agent, model, status, prompt, head_sha, created_at)
+            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)
             """,
-            (pr_id, repo, number, agent, model or None, prompt, _now()),
+            (pr_id, repo, number, agent, model or None, prompt, head_sha or None, _now()),
         )
         # A new review surfaces the pull request in the "AI Reviewed" list again,
         # even if the user had previously cleared it.
@@ -927,6 +942,7 @@ def _review_dict(row):
         "finished_at": row["finished_at"],
         "duration_ms": row["duration_ms"],
         "verdict": row["verdict"] if "verdict" in row.keys() else None,
+        "head_sha": row["head_sha"] if "head_sha" in row.keys() else None,
     }
 
 

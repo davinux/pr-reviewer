@@ -150,3 +150,6 @@ and confirm they run one at a time.
   overrides and the per-slug workspace lock.
 - **Known limitations**: the watcher is in-process, so it only polls while the
   app is running; there is no push/webhook path.
+- **Extended by** [009-re-review-on-new-commits](../009-re-review-on-new-commits/spec.md):
+  watching also re-reviews a request that was already reviewed and whose head
+  gained commits since the latest review.

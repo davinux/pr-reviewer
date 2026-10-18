@@ -48,7 +48,8 @@ except the GitHub/GitLab API calls and whatever your chosen agent does.
   including their current open/closed/merged state.
 - **Watch for new PRs** — optionally watch individual repositories; new
   pull/merge requests show a notification, play a short sound, and are reviewed
-  automatically.
+  automatically. Watched requests you have already reviewed are reviewed again
+  when their branch gains new commits.
 - **Light / dark theme** — a toggle in the navbar; it defaults to your system
   preference and remembers your choice.
 - **Resizable sidebar** — drag the divider beside the sidebar to widen or narrow
@@ -131,8 +132,9 @@ without a pid file — it looks for a Python process whose command line referenc
 
 A small `unittest` suite covers the per-repository settings (parsing, the
 inherit/override/clear round trip, multi-host lookups and input validation), the
-automatic review trigger for watched repositories, the auto-archive of reviewed
-requests that finish, and the review-status API (verdict parsing, the status and
+automatic review trigger for watched repositories (including re-reviews when a
+reviewed request gains commits), the auto-archive of reviewed requests that
+finish, and the review-status API (verdict parsing, the status and
 list endpoints, token authentication and the Swagger/OpenAPI endpoints). Run it
 with:
 
@@ -192,12 +194,27 @@ alerted about new ones:
 4. Watching also **starts a review automatically** for each new open request,
    using the repository's own settings (agent, model and limits) or the global
    ones. The review appears in the **AI Reviewed** list while it runs.
+5. Requests you have **already reviewed** are reviewed again when their branch
+   gains **new commits**. The app records the head commit a review ran against,
+   and the next sync (the button or the background watcher) starts a fresh
+   review if the head has moved on. This is not a new request, so it is not
+   announced.
+
+A request row shows the bell (🔔) beside its title when its repository is
+watched, so you can tell which requests are kept current automatically.
 
 Notes:
 
 - A repository's **first** sync only establishes a baseline — the requests that
   already existed are stored without notifying or reviewing, so you are not
   flooded when you enable watching.
+- A re-review happens only when the head commit actually changed. Editing the
+  description or adding a comment does not trigger one.
+- Revising a request several times between two syncs produces one re-review of
+  its latest head, not one per commit. A request already under review is skipped
+  until the running review finishes.
+- Reviews created before this feature have no recorded head commit, so they are
+  never used as a baseline: re-reviewing starts once you run a review again.
 - Only **open** requests are announced and reviewed. Closed and merged requests
   are still stored so their status stays accurate, but they never alert or
   trigger a review.
@@ -482,9 +499,9 @@ data/
 | Table | Contents |
 | --- | --- |
 | `repos` | Watched repositories (`full_name`, `provider`, `host`, `slug`, `watch`, `settings`). |
-| `pull_requests` | One row per PR/MR (slug, labels, draft, branches, diff stats, ...). |
+| `pull_requests` | One row per PR/MR (slug, labels, draft, branches, head commit, diff stats, ...). |
 | `comments` | Comments/notes (cascade-deleted with the request). |
-| `reviews` | Agent reviews: agent, model, status, verdict, output, error, timing. |
+| `reviews` | Agent reviews: agent, model, status, verdict, head commit reviewed, output, error, timing. |
 | `dismissed_reviews` | Requests cleared from the **AI Reviewed** sidebar list. |
 | `notifications` | New-request alerts for watched repositories (cascade-deleted with the request). |
 
@@ -497,7 +514,7 @@ backfilled). `data/` is gitignored. To reset, stop the app and delete the folder
 | --- | --- | --- |
 | `GET` | `/` | Dashboard. Optional `?repo=<slug>` and `?state=open\|closed\|merged\|all`. |
 | `GET` | `/pr/<id>` | Request detail page with the review panel. |
-| `POST` | `/api/sync` | Fetch requests (open, closed and merged) from every repo now; new open requests in watched repos are reviewed automatically, and reviewed requests that finished are archived. |
+| `POST` | `/api/sync` | Fetch requests (open, closed and merged) from every repo now; new open requests in watched repos are reviewed automatically, watched requests whose head gained commits since their last review are reviewed again, and reviewed requests that finished are archived. |
 | `GET` | `/api/prs` | Stored requests (optional `?repo=<slug>&state=<state>`). |
 | `GET` | `/api/pr/<id>` | One stored request as JSON. |
 | `GET` | `/api/pr/<id>/commits` | Commits in the request (live from the host). |
