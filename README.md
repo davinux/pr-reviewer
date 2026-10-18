@@ -36,7 +36,9 @@ except the GitHub/GitLab API calls and whatever your chosen agent does.
 - **Async with live status** — reviews run in the background and the page polls
   for progress (preparing → running → done/error).
 - **AI Reviewed list** — the sidebar tracks every reviewed pull/merge request
-  with its latest status, and you can clear the ones you are done with.
+  with its latest status; requests that are merged or closed are archived
+  automatically, and you can clear the ones you are done with (after a
+  confirmation).
 - **Local storage** — repositories, requests, comments and reviews live in
   SQLite under a single `data/` folder.
 - **Sync on demand** — a button fetches requests from the hosts when asked,
@@ -122,8 +124,9 @@ without a pid file — it looks for a Python process whose command line referenc
 ### Tests
 
 A small `unittest` suite covers the per-repository settings (parsing, the
-inherit/override/clear round trip, multi-host lookups and input validation) and
-the automatic review trigger for watched repositories. Run it with:
+inherit/override/clear round trip, multi-host lookups and input validation), the
+automatic review trigger for watched repositories, and the auto-archive of
+reviewed requests that finish. Run it with:
 
 ```bash
 python3 -m unittest discover -s tests
@@ -211,12 +214,18 @@ review, so you can follow progress without hunting for it:
 2. The coloured dot and label show the latest review status — **Queued**,
    **Preparing**, **Running**, **Reviewed** or **Failed** — and update on their
    own (the list refreshes every 15 seconds). Running reviews pulse.
-3. Click **×** next to an entry to remove it once you are done with it.
+3. Click **×** next to an entry to remove it once you are done with it; you are
+   asked to confirm first.
 
 Notes:
 
 - Membership is derived from the review history, so requests you reviewed before
   this list existed show up automatically.
+- When a request you are tracking is **merged or closed** upstream, the next
+  reload archives it for you — it leaves the list on its own with its review
+  history intact. This happens on any sync (the **Sync PRs** button or the
+  background watcher). Only the change to closed/merged counts: a request that
+  was already finished when you reviewed it stays until you remove it.
 - Removing an entry only hides it from the list; the review history is kept. Run
   a new review on the request and it reappears.
 - Removing a repository (or deleting a request) removes its entries too.
@@ -402,7 +411,7 @@ backfilled). `data/` is gitignored. To reset, stop the app and delete the folder
 | --- | --- | --- |
 | `GET` | `/` | Dashboard. Optional `?repo=<slug>` and `?state=open\|closed\|merged\|all`. |
 | `GET` | `/pr/<id>` | Request detail page with the review panel. |
-| `POST` | `/api/sync` | Fetch requests (open, closed and merged) from every repo now; new open requests in watched repos are reviewed automatically. |
+| `POST` | `/api/sync` | Fetch requests (open, closed and merged) from every repo now; new open requests in watched repos are reviewed automatically, and reviewed requests that finished are archived. |
 | `GET` | `/api/prs` | Stored requests (optional `?repo=<slug>&state=<state>`). |
 | `GET` | `/api/pr/<id>` | One stored request as JSON. |
 | `GET` | `/api/pr/<id>/commits` | Commits in the request (live from the host). |
@@ -443,8 +452,9 @@ pr-reviewer/
 │   ├── memory/constitution.md
 │   └── templates/
 ├── tests/
-│   ├── test_repo_settings.py  # Per-repository settings tests
-│   └── test_auto_review.py    # Automatic review of watched repos
+│   ├── test_repo_settings.py     # Per-repository settings tests
+│   ├── test_auto_review.py       # Automatic review of watched repos
+│   └── test_archive_reviewed.py  # Auto-archive of reviewed requests
 ├── scripts/
 │   ├── start.sh           # Start the server in the background
 │   ├── stop.sh            # Stop it
@@ -476,7 +486,8 @@ The workflow, with a template for each step in `.specify/templates/`:
 | Clarify | resolved `[NEEDS CLARIFICATION]`s, checked against the review checklist |
 | `/plan` | `specs/NNN-feature/plan.md` — approach, affected modules, constitution check |
 | `/tasks` | `specs/NNN-feature/tasks.md` — ordered, independently testable tasks |
-| Implement | merged code + tests, with the spec updated if behaviour diverged |
+| Implement | code + tests on a feature branch, with the spec updated if behaviour diverged |
+| Ship | a commit on the branch and a pull request — the default once the suite passes |
 
 A new feature takes the next free number and a short kebab-case name, for
 example `specs/007-review-priority-labels/`.

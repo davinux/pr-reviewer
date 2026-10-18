@@ -272,6 +272,8 @@ def sync_repos(only_watched=False):
     New requests in a *watched* repository are queued as notifications and, for
     open ones, a review is started automatically -- unless the repository is
     being synced for the very first time (everything would look new then).
+    Reviewed requests that change from open to closed or merged are archived out
+    of the "AI Reviewed" sidebar list.
     Returns the sync summary; when new watched requests were found,
     ``notifications`` carries them for immediate display.
     """
@@ -281,7 +283,9 @@ def sync_repos(only_watched=False):
     try:
         settings = get_settings()
         known = storage.existing_pr_meta()
+        known_states = storage.existing_pr_states()
         new_prs = 0
+        archived = 0
         notifications = []
         auto_reviews = []
 
@@ -304,6 +308,7 @@ def sync_repos(only_watched=False):
                 if entry.get("id") is None:
                     continue
                 is_new = entry["id"] not in known
+                prev_state = known_states.get(entry["id"])
                 if is_new or known.get(entry["id"]) != entry.get("updated_at"):
                     comments = provider.fetch_comments(repo, entry["number"], token, settings)
                     storage.save_pr(entry, comments)
@@ -317,7 +322,14 @@ def sync_repos(only_watched=False):
                             auto_reviews.append((entry["id"], repo))
                 else:
                     storage.save_pr(entry)
+                # A request that just finished (open -> closed/merged) leaves the
+                # "AI Reviewed" list. Only the transition counts, so a review
+                # started on an already-finished request is not hidden.
+                if prev_state == "open" and entry.get("state") in ("closed", "merged"):
+                    if storage.archive_review(entry["id"]):
+                        archived += 1
                 known[entry["id"]] = entry.get("updated_at")
+                known_states[entry["id"]] = entry.get("state")
 
         for entry in notifications:
             storage.add_notification(entry)
@@ -325,6 +337,8 @@ def sync_repos(only_watched=False):
         auto_reviewed = start_auto_reviews(auto_reviews, settings)
 
         payload = {"new_prs": new_prs, "total_prs": storage.count_prs()}
+        if archived:
+            payload["archived"] = archived
         if auto_reviewed:
             payload["auto_reviewed"] = auto_reviewed
         if notifications:

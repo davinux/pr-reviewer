@@ -19,7 +19,8 @@ template in [`.specify/templates/`](../.specify/templates).
 | 2. Clarify | *(review)* | resolved `[NEEDS CLARIFICATION]`s | `checklist-template.md` |
 | 3. Plan | `/plan` | `specs/NNN-feature/plan.md` | `plan-template.md` |
 | 4. Tasks | `/tasks` | `specs/NNN-feature/tasks.md` | `tasks-template.md` |
-| 5. Implement | *(coding)* | merged code + tests | — |
+| 5. Implement | *(coding)* | code + tests on the feature branch | — |
+| 6. Ship | *(default)* | committed branch + pull request | — |
 
 1. **Specify** — describe the *what* and *why*: prioritised user stories,
    functional requirements and measurable success criteria. No implementation
@@ -31,6 +32,10 @@ template in [`.specify/templates/`](../.specify/templates).
 4. **Tasks** — break the plan into ordered, independently testable tasks.
 5. **Implement** — work the tasks on a branch; add or extend tests; run
    `python3 -m unittest discover -s tests`.
+6. **Ship** — once the suite passes and the work matches the spec, commit the
+   branch and open a pull request. This is the **default** outcome of a finished
+   feature: no need to ask first. (Interrupted or unverified work stays
+   uncommitted.)
 
 A new feature gets the next free number and a short kebab-case name:
 
@@ -59,6 +64,7 @@ Each spec carries a status: `Draft` → `Clarified` → `Planned` → `In Progre
 | 004 | Watch and automatic review | Implemented | [spec](004-watch-and-auto-review/spec.md) |
 | 005 | Agent review pipeline | Implemented | [spec](005-agent-review-pipeline/spec.md) |
 | 006 | AI-reviewed tracking list | Implemented | [spec](006-ai-reviewed-list/spec.md) |
+| 007 | Auto-archive reviewed requests | Implemented | [spec](007-auto-archive-reviewed/spec.md) |
 
 The first six specs were **retrofitted** onto features that already shipped, so
 they are the as-is baseline: each has status `Implemented` and an *Implementation

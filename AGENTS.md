@@ -66,9 +66,12 @@ constitution; the process is in [`specs/README.md`](specs/README.md).
    each is independently testable.
 5. **Implement** — work the tasks on a feature branch, add or extend tests, run
    the full suite, and update the spec if the implementation diverged.
+6. **Ship** — once the full suite passes and the work matches the spec, commit
+   on the branch and open a pull request. This is the **default**: do not wait to
+   be asked to commit or to open the PR. Note the branch and PR in your summary.
 
 The next free spec number is the one after the highest in `specs/` (currently
-`006`, so a new feature is `007-`).
+`007`, so a new feature is `008-`).
 
 ### Existing specs
 
