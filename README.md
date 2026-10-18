@@ -20,6 +20,9 @@ agent does.
   other CLI.
 - **Selectable repositories** — pick a repo from the sidebar to see just its
   requests, or "All repositories".
+- **Per-repository settings** — override the review prompt, agent, model and
+  limits for individual repositories; anything you leave alone falls back to the
+  global Settings.
 - **Status tabs** — the request list is split into **Open**, **Closed**,
   **Merged** and **All** tabs, each with a live count, so finished requests no
   longer clutter the ones still needing attention.
@@ -287,6 +290,30 @@ placeholders:
 
 Use **Restore default** to go back to the built-in prompt.
 
+### Per-repository settings
+
+The global Settings act as defaults for every repository, but each repository
+can override the review-related ones. Click the gear (⚙) next to a repository in
+the sidebar to open its settings dialog; the gear is highlighted once a repo has
+its own overrides.
+
+These keys can be set per repository:
+
+| Setting | Description |
+| --- | --- |
+| Review prompt | A prompt template just for this repo. |
+| Agent | The agent to preselect here (`opencode`, `pi`, `claude`, `copilot`, `custom`). |
+| Model | The model to preselect here. |
+| Review timeout | Seconds before a running agent is killed. |
+| Max prompt characters | Truncate the prompt before passing it to the agent. |
+| Max description characters | Truncate the request description inside the prompt (`0` = no limit). |
+
+A field is only stored when it differs from the global value: leave it empty (or
+equal to the global value) and the repository inherits the global setting. The
+dialog shows the global value as a hint and offers **Use global** and
+**Built-in default** shortcuts for the prompt. Overrides are stored in the
+`settings` column of the `repos` table.
+
 ### Settings file
 
 `data/settings.json` holds all of the above; the tokens are stored in plain text,
@@ -330,7 +357,7 @@ data/
 
 | Table | Contents |
 | --- | --- |
-| `repos` | Watched repositories (`full_name`, `provider`, `host`, `slug`, `watch`). |
+| `repos` | Watched repositories (`full_name`, `provider`, `host`, `slug`, `watch`, `settings`). |
 | `pull_requests` | One row per PR/MR (slug, labels, draft, branches, diff stats, ...). |
 | `comments` | Comments/notes (cascade-deleted with the request). |
 | `reviews` | Agent reviews: agent, model, status, output, error, timing. |
@@ -355,6 +382,7 @@ backfilled). `data/` is gitignored. To reset, stop the app and delete the folder
 | `POST` | `/api/repos` | Add repos: `{"repos": ["owner/repo"], "provider": "gitlab"}`. |
 | `DELETE` | `/api/repos/<slug>` | Remove a repo and its data. |
 | `POST` | `/api/repos/<slug>/watch` | Watch/unwatch a repo for new PRs: `{"watch": true}`. |
+| `GET`/`POST` | `/api/repos/<slug>/settings` | Read/update per-repository settings overrides. |
 | `GET` | `/api/notifications` | Stored new-PR notifications (`?unseen=1` for unseen only). |
 | `POST` | `/api/notifications/seen` | Mark notifications seen: `{"ids": [1, 2]}` (all when omitted). |
 | `GET` | `/api/providers` | GitHub/GitLab hosts, URLs and whether tokens are configured. |

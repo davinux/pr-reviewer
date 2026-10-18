@@ -89,6 +89,15 @@
         }
         .repo-watch:hover { background: var(--app-hover-bg); opacity: 1; }
         .repo-watch.active { opacity: 1; filter: none; }
+        .repo-settings {
+            border: 0; background: transparent; color: var(--app-icon); line-height: 1;
+            font-size: .95rem; padding: 0 .3rem; border-radius: var(--app-radius-sm);
+            cursor: pointer; opacity: .45;
+            transition: opacity var(--app-transition), color var(--app-transition),
+                        background-color var(--app-transition);
+        }
+        .repo-settings:hover { background: var(--app-hover-bg); opacity: 1; }
+        .repo-settings.active { opacity: 1; color: var(--app-accent); }
         .count-badge {
             background: var(--app-badge-bg); color: var(--app-badge-fg); font-size: .72rem;
             font-weight: 600; border-radius: 999px; padding: .05rem .5rem;
@@ -236,6 +245,9 @@
                             onclick="toggleWatch('{{ repo.slug }}', {{ 'false' if repo.watch else 'true' }})">
                         {{ '🔔' if repo.watch else '🔕' }}
                     </button>
+                    <button class="repo-settings {% if repo.settings %}active{% endif %}"
+                            title="{{ 'Repository settings (customised)' if repo.settings else 'Repository settings' }}"
+                            onclick="openRepoSettings('{{ repo.slug }}')">&#9881;</button>
                     <button class="repo-remove" title="Remove repository"
                             onclick="removeRepo('{{ repo.slug }}')">&times;</button>
                 </div>
@@ -708,6 +720,77 @@
         </div>
     </div>
 
+    <!-- Per-repository settings (overrides of the global Settings) -->
+    <div class="modal fade" id="repoSettingsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Repository settings — <span id="repoSettingsName"></span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info py-2" id="repoSettingsHint">
+                        These values apply only to this repository. Anything left empty (or equal
+                        to the global value) falls back to the global Settings.
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Agent</label>
+                            <select id="repoAgentInput" class="form-select">
+                                <option value="">Use global default</option>
+                                {% for agent in agents %}
+                                <option value="{{ agent.id }}" {% if not agent.installed %}disabled{% endif %}>
+                                    {{ agent.label }}{% if not agent.installed %} (not installed){% endif %}
+                                </option>
+                                {% endfor %}
+                                <option value="custom">Custom command</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Model <span class="muted">(optional)</span></label>
+                            <input type="text" id="repoModelInput" class="form-control" list="modelOptions"
+                                   placeholder="provider/model">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Review timeout (seconds)</label>
+                            <input type="number" min="1" id="repoTimeoutInput" class="form-control">
+                            <div class="form-text">Global: <span class="repo-global" data-key="review_timeout"></span></div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Max prompt characters</label>
+                            <input type="number" min="1000" id="repoMaxPromptInput" class="form-control">
+                            <div class="form-text">Global: <span class="repo-global" data-key="max_prompt_chars"></span></div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Max description characters</label>
+                            <input type="number" min="0" id="repoMaxDescInput" class="form-control">
+                            <div class="form-text">Global: <span class="repo-global" data-key="max_description_chars"></span> · 0 = no truncation</div>
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label class="form-label mb-0">Review prompt template</label>
+                        <div class="btn-group btn-group-sm">
+                            <button type="button" class="btn btn-outline-secondary"
+                                    onclick="repoPromptUseGlobal()">Use global</button>
+                            <button type="button" class="btn btn-outline-secondary"
+                                    onclick="repoPromptUseBuiltin()">Built-in default</button>
+                        </div>
+                    </div>
+                    <textarea id="repoPromptInput" class="form-control font-monospace" rows="12"
+                              spellcheck="false"></textarea>
+                    <div class="form-text" id="repoPromptHint"></div>
+                </div>
+                <div class="modal-footer">
+                    <span class="muted small me-auto" id="repoSettingsStatus"></span>
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button class="btn btn-primary" onclick="saveRepoSettings()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Toasts for new pull requests in watched repositories -->
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastContainer"></div>
 
@@ -817,6 +900,145 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ watch: watch })
             }).then(r => r.json()).then(() => location.reload());
+        }
+
+        // ---- Per-repository settings (overrides of the global Settings) ----
+        let repoSettingsCtx = null;
+
+        function repoField(id) {
+            const el = document.getElementById(id);
+            return el ? el.value.trim() : '';
+        }
+
+        function repoNumber(id, fallback) {
+            const raw = repoField(id);
+            if (raw === '') return fallback;
+            const n = parseInt(raw, 10);
+            return Number.isFinite(n) ? n : fallback;
+        }
+
+        function fmtGlobal(value) {
+            return (value === '' || value == null) ? 'default' : String(value);
+        }
+
+        async function openRepoSettings(slug) {
+            const modalEl = document.getElementById('repoSettingsModal');
+            if (!modalEl) return;
+            const status = document.getElementById('repoSettingsStatus');
+            status.textContent = 'Loading…';
+            let data;
+            try {
+                const res = await fetch('/api/repos/' + encodeURIComponent(slug) + '/settings');
+                data = await res.json();
+                if (!res.ok) {
+                    status.textContent = '';
+                    appAlert({ title: 'Repository settings', message: data.error || 'Could not load settings.' });
+                    return;
+                }
+            } catch (err) {
+                status.textContent = '';
+                appAlert({ title: 'Repository settings', message: 'Could not load settings: ' + err });
+                return;
+            }
+
+            repoSettingsCtx = data;
+            const overrides = data.overrides || {};
+            const global = data.global || {};
+            const builtin = (data.builtin_prompt || DEFAULT_PROMPT || '').trim();
+
+            document.getElementById('repoSettingsName').textContent = data.repo.full_name;
+
+            const agentSel = document.getElementById('repoAgentInput');
+            agentSel.options[0].textContent = global.default_agent
+                ? 'Use global default (' + global.default_agent + ')'
+                : 'Use global default (auto)';
+            agentSel.value = overrides.default_agent || '';
+
+            document.getElementById('repoModelInput').value = overrides.default_model || '';
+            document.getElementById('repoModelInput').placeholder =
+                global.default_model ? global.default_model : 'provider/model';
+
+            document.getElementById('repoTimeoutInput').value =
+                overrides.review_timeout != null ? overrides.review_timeout : global.review_timeout;
+            document.getElementById('repoMaxPromptInput').value =
+                overrides.max_prompt_chars != null ? overrides.max_prompt_chars : global.max_prompt_chars;
+            document.getElementById('repoMaxDescInput').value =
+                overrides.max_description_chars != null
+                    ? overrides.max_description_chars : global.max_description_chars;
+
+            document.querySelectorAll('#repoSettingsModal .repo-global').forEach(el => {
+                el.textContent = fmtGlobal(global[el.dataset.key]);
+            });
+
+            document.getElementById('repoPromptInput').value =
+                overrides.review_prompt || global.review_prompt || builtin;
+            document.getElementById('repoPromptHint').textContent = global.review_prompt
+                ? 'Empty or unchanged text uses the global prompt.'
+                : 'Empty text uses the built-in prompt.';
+
+            status.textContent = '';
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        }
+
+        function repoPromptUseGlobal() {
+            if (!repoSettingsCtx) return;
+            const global = repoSettingsCtx.global || {};
+            const builtin = (repoSettingsCtx.builtin_prompt || DEFAULT_PROMPT || '').trim();
+            document.getElementById('repoPromptInput').value = global.review_prompt || builtin;
+        }
+
+        function repoPromptUseBuiltin() {
+            document.getElementById('repoPromptInput').value =
+                (repoSettingsCtx && repoSettingsCtx.builtin_prompt) || DEFAULT_PROMPT || '';
+        }
+
+        async function saveRepoSettings() {
+            if (!repoSettingsCtx) return;
+            const global = repoSettingsCtx.global || {};
+            const builtin = (repoSettingsCtx.builtin_prompt || DEFAULT_PROMPT || '').trim();
+            const promptFallback = (global.review_prompt || builtin).trim();
+
+            // Empty values (or ones equal to the global fallback) mean "inherit".
+            const payload = {};
+
+            const agent = repoField('repoAgentInput');
+            payload.default_agent = (agent && agent !== (global.default_agent || '')) ? agent : '';
+
+            const model = repoField('repoModelInput');
+            payload.default_model = (model && model !== (global.default_model || '')) ? model : '';
+
+            let prompt = repoField('repoPromptInput');
+            if (!prompt || prompt === promptFallback) prompt = '';
+            payload.review_prompt = prompt;
+
+            const timeout = repoNumber('repoTimeoutInput', global.review_timeout);
+            payload.review_timeout = timeout === global.review_timeout ? '' : timeout;
+
+            const maxPrompt = repoNumber('repoMaxPromptInput', global.max_prompt_chars);
+            payload.max_prompt_chars = maxPrompt === global.max_prompt_chars ? '' : maxPrompt;
+
+            const maxDesc = repoNumber('repoMaxDescInput', global.max_description_chars);
+            payload.max_description_chars = maxDesc === global.max_description_chars ? '' : maxDesc;
+
+            const status = document.getElementById('repoSettingsStatus');
+            status.textContent = 'Saving…';
+            try {
+                const res = await fetch(
+                    '/api/repos/' + encodeURIComponent(repoSettingsCtx.repo.slug) + '/settings',
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    status.textContent = data.error || 'Could not save settings.';
+                    return;
+                }
+                location.reload();
+            } catch (err) {
+                status.textContent = 'Could not save settings: ' + err;
+            }
         }
 
         async function loadModels(force) {

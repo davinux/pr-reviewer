@@ -35,6 +35,9 @@ INT_SETTINGS = (
 )
 DICT_SETTINGS = ("agent_commands", "agent_binaries", "agent_model_commands")
 
+# Settings a repository may override (see ``storage.REPO_SETTINGS``).
+REPO_INT_SETTINGS = set(storage.REPO_INT_SETTINGS)
+
 # The watcher never polls faster than this, whatever ``watch_interval`` says.
 WATCH_MIN_INTERVAL = 15
 
@@ -74,6 +77,61 @@ def settings_payload():
     settings["default_review_prompt"] = reviewer.DEFAULT_REVIEW_PROMPT
     settings["defaults"] = {key: storage.DEFAULT_SETTINGS[key] for key in storage.DEFAULT_SETTINGS}
     return settings
+
+
+def _clean_repo_overrides(data, settings):
+    """Keep only known, non-empty per-repository overrides from a request body."""
+    overrides = {}
+    for key in storage.REPO_SETTINGS:
+        if key not in data:
+            continue
+        value = data[key]
+        if key in REPO_INT_SETTINGS:
+            if value not in (None, ""):
+                overrides[key] = _as_int(value, settings.get(key))
+        else:
+            text = str(value).strip()
+            if text:
+                overrides[key] = text
+    return overrides
+
+
+def effective_repo_settings(settings, repo):
+    """Merge a repository's overrides onto the global settings.
+
+    Only the keys in ``storage.REPO_SETTINGS`` are considered, and empty
+    overrides are ignored, so clearing a field restores the global default.
+    """
+    if not repo:
+        return settings
+    overrides = repo.get("settings") or {}
+    if not overrides:
+        return settings
+    merged = dict(settings)
+    for key, value in overrides.items():
+        if key not in storage.REPO_SETTINGS:
+            continue
+        if key in REPO_INT_SETTINGS:
+            if value not in (None, ""):
+                merged[key] = _as_int(value, settings.get(key))
+        else:
+            text = str(value).strip()
+            if text:
+                merged[key] = text
+    return merged
+
+
+def repo_settings_payload(repo, settings):
+    """Per-repository settings for the UI: current overrides and global fallbacks."""
+    return {
+        "repo": {
+            "slug": repo["slug"],
+            "full_name": repo["full_name"],
+        },
+        "overrides": repo.get("settings") or {},
+        "global": {key: settings.get(key) for key in storage.REPO_SETTINGS},
+        "builtin_prompt": reviewer.DEFAULT_REVIEW_PROMPT,
+    }
 
 
 # Human-readable labels for the review statuses shown in the sidebar list.
@@ -323,6 +381,26 @@ def api_repo_watch(slug):
     return jsonify({"error": "repo not found"}), 404
 
 
+@app.route("/api/repos/<path:slug>/settings", methods=["GET", "POST"])
+def api_repo_settings(slug):
+    """Read or update one repository's overrides of the global settings.
+
+    The global settings are the defaults; a repository may override the review
+    prompt, agent, model and limits. Sending an empty value clears an override.
+    """
+    settings = get_settings()
+    repo = storage.get_repo(slug)
+    if not repo:
+        return jsonify({"error": "repo not found"}), 404
+
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        storage.set_repo_settings(slug, _clean_repo_overrides(data, settings))
+        repo = storage.get_repo(slug)
+
+    return jsonify(repo_settings_payload(repo, settings))
+
+
 @app.route("/api/notifications")
 def api_notifications():
     """Notifications about new requests in watched repositories."""
@@ -403,6 +481,8 @@ def pr_detail(pr_id):
     pr = storage.get_pr(pr_id)
     if pr:
         settings = get_settings()
+        repo = storage.get_repo(pr.get("slug") or pr["repo"])
+        settings = effective_repo_settings(settings, repo)
         return render_template(
             "pr_detail.html",
             pr=pr,
@@ -421,6 +501,8 @@ def api_start_review(pr_id):
         return jsonify({"error": "PR not found"}), 404
 
     settings = get_settings()
+    repo = storage.get_repo(pr.get("slug") or pr["repo"])
+    settings = effective_repo_settings(settings, repo)
     data = request.get_json(silent=True) or {}
 
     agent_id = (data.get("agent") or settings["default_agent"] or "").strip()
