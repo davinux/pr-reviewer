@@ -298,7 +298,14 @@ curl -H "X-API-Token: <token>" "http://localhost:5000/api/v1/reviews?limit=10"
 
 The Swagger UI and the OpenAPI document stay reachable without the token so the
 token can be entered in the UI's **Authorize** dialog; the data endpoints return
-`401` until it is presented.
+`401` until it is presented. Use the **Clear** button beside the field to remove
+a saved token and return to the open default.
+
+> **Scope:** the API token protects **only** the read-only `/api/v1` endpoints.
+> The rest of the app — `/api/settings`, `/api/sync`, starting reviews,
+> removing repositories and the web UI — is **not** covered by it. Do not expose
+> the app to an untrusted network without separate protection (a firewall, a
+> reverse proxy with authentication, or a VPN).
 
 ## Supported agents
 

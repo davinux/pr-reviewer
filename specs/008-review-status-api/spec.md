@@ -111,6 +111,8 @@ works without authentication.
    request succeeds.
 4. **Given** a token is configured, **When** the user opens `/api/docs`, **Then**
    the documentation still loads so the token can be entered there.
+5. **Given** a saved token, **When** the user clears it in Settings, **Then**
+   calls succeed without credentials again.
 
 ---
 
@@ -137,10 +139,13 @@ filtered set.
 
 ### Edge Cases
 
-- A very large output containing the marker several times: the **last** marker
-  wins, so an agent quoting the instruction before giving its verdict is handled.
-- A marker wrapped in Markdown (`**REVIEW_VERDICT: PASS**`) or in a code fence is
-  still recognised.
+- A marker that is **not** the final content line — a line quoted from the diff,
+  or the prompt's own instruction text — is ignored, so trailing content cannot
+  flip the result; a review whose last content line is not a marker reads as
+  `unknown`.
+- A final marker wrapped in Markdown (`**REVIEW_VERDICT: PASS**`), written as a
+  bullet, or inside a code fence is still recognised; trailing blank lines, code
+  fences and horizontal rules after it are ignored.
 - A review that **errored** (the agent crashed or timed out) has no verdict; the
   status reports `passed: null` with the run `status` of `error`.
 - A request missing both `repo`/`number` and `pr_id`: `400`.
@@ -155,8 +160,10 @@ filtered set.
 
 - **FR-001**: For every review that completes successfully, the app MUST record a
   verdict of `passed` or `failed`, parsed from a machine-readable marker in the
-  agent's output; when the marker is absent it MUST record `unknown`. Reviews
-  that do not complete (error or still running) MUST NOT record a verdict.
+  agent's output; when the marker is absent it MUST record `unknown`. The marker
+  MUST be the **final content line** of the output, so text that follows the
+  agent's own verdict cannot change the result. Reviews that do not complete
+  (error or still running) MUST NOT record a verdict.
 - **FR-002**: The app MUST ask the agent, in **every** review prompt (the default
   template and any custom override), to end its review with a line of the form
   `REVIEW_VERDICT: PASS` or `REVIEW_VERDICT: FAIL`.
@@ -172,8 +179,8 @@ filtered set.
   `passed`, `false` when it is `failed`, and `null` otherwise (no review, review
   not finished, errored, or `unknown`).
 - **FR-006**: An unknown request MUST return `404`. A request that omits the
-  identifying parameters, or supplies only one of `repo`/`number`, MUST return
-  `400` with a JSON error.
+  identifying parameters, supplies only one of `repo`/`number`, or passes a
+  non-integer `number`/`pr_id` MUST return `400` with a JSON error.
 - **FR-007**: The API MUST be read-only: it MUST NOT start, cancel or modify
   reviews, and MUST NOT contact any hosting provider.
 - **FR-008**: `GET /api/docs` MUST serve an interactive Swagger UI, and
@@ -184,17 +191,23 @@ filtered set.
 - **FR-010**: When `api_token` is configured, every `/api/v1` data endpoint MUST
   require it — accepted in `Authorization: Bearer <token>` or `X-API-Token:
   <token>` — and MUST return `401` when it is missing or wrong. The Swagger UI
-  page and the OpenAPI document MUST remain reachable without the token.
+  page and the OpenAPI document MUST remain reachable without the token. The
+  token scopes to `/api/v1` only; the app MUST NOT imply it protects the other
+  (mutating) routes, and the UI MUST say so.
 - **FR-011**: When `api_token` is empty (the default), the API MUST be reachable
-  without authentication.
+  without authentication. A user MUST be able to clear a saved token from the UI
+  to return to this state.
 - **FR-012**: The API token MUST be stored only in `DATA_DIR`, MUST be masked
   wherever settings are displayed, and MUST be redacted from any captured
   command line or error text (like the provider tokens).
 - **FR-013**: The app MUST expose `GET /api/v1/reviews` listing reviewed requests
-  with the same result fields as FR-004, filterable by `repo` and by `verdict`,
-  and bounded by a `limit`.
+  with the same result fields as FR-004, filterable by `repo` (using the same
+  slug-only matching as FR-003) and by `verdict`, and bounded by a `limit`. A
+  non-integer `limit` MUST return `400`; a numeric one is clamped to `1`–`500`.
 - **FR-014**: The verdict MUST be added to storage additively, so an existing
-  database keeps working after an upgrade without a manual migration.
+  database keeps working after an upgrade without a manual migration. Completed
+  reviews stored before the verdict existed MUST read as `unknown` (backfilled),
+  not as no verdict.
 - **FR-015**: The verdict MUST be visible in the app's own UI: the AI Reviewed
   sidebar list and the request page MUST show a passed/failed/unknown indicator,
   and `GET /api/reviewed` MUST include the verdict.

@@ -98,16 +98,19 @@ concerns.
 - **Verdict marker**: `reviewer.VERDICT_INSTRUCTION` is appended to every rendered
   prompt in `build_prompt`, so a custom `review_prompt` cannot accidentally drop
   it. The default prompt is left unchanged.
-- **Parsing**: `reviewer.parse_verdict(output)` finds every
-  `REVIEW_VERDICT: (PASS|FAIL)` occurrence (case-insensitive, tolerant of Markdown
-  and fences) and takes the **last**; `PASS` → `passed`, `FAIL` → `failed`, no
-  match → `None`. On a successful run, `_run_review` stores the parsed value or
-  `unknown` when there is no marker; failed runs store nothing.
+- **Parsing**: `reviewer.parse_verdict(output)` looks only at the **final content
+  line** (skipping trailing blanks, fences and rules), tolerating surrounding
+  Markdown; `PASS` → `passed`, `FAIL` → `failed`, anything else → `None`. This
+  stops diff content or a quoted example after the verdict from flipping it. On a
+  successful run, `_run_review` stores the parsed value or `unknown` when there is
+  no marker; failed runs store nothing.
 - **Storage**: `reviews.verdict TEXT` is added to `SCHEMA` for new databases and
   to `_EXTRA_REVIEW_COLUMNS`, applied in `init_db` via `_ensure_columns` for
-  existing ones. `verdict` joins `REVIEW_FIELDS` and `_review_dict`. New helpers:
-  `get_pr_by_number(slug, number)`, `latest_review(pr_id)`, `count_reviews(pr_id)`
-  and `list_review_statuses(repo, verdict, limit)`.
+  existing ones, followed by `_backfill_review_verdicts` so completed reviews that
+  predate the column read as `unknown`. `verdict` joins `REVIEW_FIELDS` and
+  `_review_dict`. New helpers: `get_pr_by_number(slug, number)` (slug-only),
+  `latest_review(pr_id)`, `count_reviews(pr_id)` and
+  `list_review_statuses(repo, verdict, limit)`.
 - **Read model**: `api._result(pr)` builds the single result shape from the
   request plus its latest review; `passed` is derived exactly per FR-005.
 - **Auth**: `api.require_token` checks `api_token` from settings; empty means

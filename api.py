@@ -141,7 +141,7 @@ def _result_from_row(row):
     """The same view, built from a ``storage.list_review_statuses`` row."""
     verdict = row["verdict"]
     return {
-        "repo": row["slug"] or row["full_name"],
+        "repo": row["slug"] or f"{row['host'] or 'github.com'}/{row['full_name']}",
         "number": row["number"],
         "pr_id": row["pr_id"],
         "title": row["title"],
@@ -169,14 +169,18 @@ def _error(message, status, code):
 
 
 def _limit_argument():
-    """Clamp ``?limit=`` to a sane, bounded window."""
+    """Return the bounded ``?limit=`` window, or raise ``ValueError`` if invalid.
+
+    A non-numeric value is rejected (like an invalid ``verdict``); a numeric one
+    outside 1–500 is clamped.
+    """
     raw = request.args.get("limit")
     if raw in (None, ""):
         return DEFAULT_LIMIT
     try:
         value = int(raw)
     except (TypeError, ValueError):
-        return DEFAULT_LIMIT
+        raise ValueError("'limit' must be a whole number.")
     return max(1, min(MAX_LIMIT, value))
 
 
@@ -228,7 +232,12 @@ def review_list():
             "invalid_parameter",
         )
 
-    rows = storage.list_review_statuses(repo=repo, verdict=verdict, limit=_limit_argument())
+    try:
+        limit = _limit_argument()
+    except ValueError as exc:
+        return _error(str(exc), 400, "invalid_parameter")
+
+    rows = storage.list_review_statuses(repo=repo, verdict=verdict, limit=limit)
     results = [_result_from_row(row) for row in rows]
     return jsonify({"reviews": results, "count": len(results)})
 

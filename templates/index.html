@@ -693,13 +693,21 @@
                             <h6>API</h6>
                             <div class="mb-3">
                                 <label class="form-label">API token <span class="muted">(optional)</span></label>
-                                <input type="password" id="apiTokenInput" class="form-control"
-                                       placeholder="{{ '•••••••• (saved)' if settings.api_token else 'leave empty for an open, unauthenticated API' }}">
+                                <div class="input-group">
+                                    <input type="password" id="apiTokenInput" class="form-control"
+                                           placeholder="{{ '•••••••• (saved)' if settings.api_token else 'leave empty for an open API' }}">
+                                    <button class="btn btn-outline-secondary" type="button"
+                                            id="apiTokenClearBtn" onclick="clearApiToken()"
+                                            {% if not settings.api_token %}disabled{% endif %}>Clear</button>
+                                </div>
                                 <div class="form-text">
                                     Protects the read-only <code>/api/v1</code> endpoints. When set, callers
                                     must send it as <code>Authorization: Bearer &lt;token&gt;</code> or the
                                     <code>X-API-Token</code> header. Interactive docs:
                                     <a href="/api/docs" target="_blank" rel="noopener">/api/docs</a>.
+                                    <strong>This token protects only <code>/api/v1</code></strong> — the rest
+                                    of the app (settings, sync, reviews) stays open, so do not expose it to a
+                                    network without separate protection.
                                 </div>
                             </div>
                             <div class="alert alert-warning py-2 mb-0">
@@ -864,6 +872,24 @@
 
         function promptInput() {
             return document.getElementById('promptInput');
+        }
+
+        // The API token is a password field, so an empty value on load means
+        // "unchanged". A dedicated clear control opts into removing it.
+        let apiTokenCleared = false;
+
+        function clearApiToken() {
+            const input = document.getElementById('apiTokenInput');
+            const btn = document.getElementById('apiTokenClearBtn');
+            apiTokenCleared = true;
+            if (input) {
+                input.value = '';
+                input.disabled = true;
+            }
+            if (btn) {
+                btn.textContent = 'Will be cleared';
+                btn.disabled = true;
+            }
         }
 
         function resetPrompt() {
@@ -1168,7 +1194,8 @@
             const gitlabToken = fieldValue('gitlabTokenInput');
             if (gitlabToken) payload.gitlab_token = gitlabToken;
             const apiToken = fieldValue('apiTokenInput');
-            if (apiToken) payload.api_token = apiToken;
+            if (apiTokenCleared) payload.api_token = '';
+            else if (apiToken) payload.api_token = apiToken;
 
             const status = document.getElementById('settingsStatus');
             status.textContent = 'Saving…';

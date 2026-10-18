@@ -236,6 +236,7 @@ def init_db():
             _ensure_columns(conn, "pull_requests", _EXTRA_PR_COLUMNS)
             _ensure_columns(conn, "reviews", _EXTRA_REVIEW_COLUMNS)
             _backfill_provider_columns(conn)
+            _backfill_review_verdicts(conn)
             conn.executescript(INDEXES)
         _initialized = True
 
@@ -261,6 +262,19 @@ def _backfill_provider_columns(conn):
     # Rows stored before states were tracked were all open requests; default
     # them so the "Open" tab and the per-state counts agree.
     conn.execute("UPDATE pull_requests SET state = 'open' WHERE state IS NULL OR state = ''")
+
+
+def _backfill_review_verdicts(conn):
+    """Give pre-verdict completed reviews an explicit ``unknown`` verdict.
+
+    Reviews written before the verdict column existed carry nothing; a request
+    that finished without a machine-readable marker is ``unknown``, not NULL, so
+    the API's verdict filter and the "unknown until re-reviewed" promise hold.
+    Only completed reviews are touched, and the update is idempotent.
+    """
+    conn.execute(
+        "UPDATE reviews SET verdict = 'unknown' WHERE status = 'done' AND verdict IS NULL"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -554,7 +568,8 @@ def get_pr_by_number(slug, number):
     """One request by its repository slug and number, or ``None``.
 
     Keyed on the slug (``<host>/<owner>/<repo>``) because the same ``owner/repo``
-    may exist on two hosts, so the number alone is not unique.
+    may exist on two hosts, so the number alone is not unique. Comments are not
+    loaded -- API callers only need the request's identity.
     """
     try:
         number = int(number)
@@ -565,12 +580,7 @@ def get_pr_by_number(slug, number):
             "SELECT * FROM pull_requests WHERE slug = ? AND number = ?",
             (slug, number),
         ).fetchone()
-        if row is None:
-            return None
-        comment_rows = conn.execute(
-            "SELECT * FROM comments WHERE pr_id = ? ORDER BY created_at ASC", (row["id"],)
-        ).fetchall()
-    return _pr_dict(row, [_comment_dict(c) for c in comment_rows])
+    return _pr_dict(row, []) if row else None
 
 
 def list_prs(repo=None, state=None):
@@ -877,15 +887,16 @@ def list_review_statuses(repo=None, verdict=None, limit=50):
     """Every reviewed request with its latest review, newest review first.
 
     Optionally narrowed to one repo slug and/or one stored verdict
-    (``passed``, ``failed`` or ``unknown``). Unlike ``list_reviewed_prs`` this is
-    not filtered by ``dismissed_reviews``, so it suits an API that reports the
-    truth regardless of the sidebar.
+    (``passed``, ``failed`` or ``unknown``). The repo filter is slug-only, to
+    match ``get_pr_by_number`` (the slug is the canonical identity). Unlike
+    ``list_reviewed_prs`` this is not filtered by ``dismissed_reviews``, so it
+    suits an API that reports the truth regardless of the sidebar.
     """
     where = []
     params = []
     if repo:
-        where.append("(p.slug = ? OR p.full_name = ?)")
-        params.extend((repo, repo))
+        where.append("p.slug = ?")
+        params.append(repo)
     if verdict:
         where.append("r.verdict = ?")
         params.append(verdict)

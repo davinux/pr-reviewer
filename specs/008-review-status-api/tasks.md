@@ -141,6 +141,31 @@ the spec.
 
 ---
 
+## Phase 8: Review follow-ups (from the PR's own review)
+
+- [x] T023 [US1] Anchor the verdict to the **final content line** in
+  `reviewer.parse_verdict`, so diff content or a quoted example after the
+  verdict cannot flip it, and the prompt's instruction text is not read as a
+  verdict. (Blocking #1.)
+- [x] T024 [US1] Backfill `reviews.verdict='unknown'` for completed reviews on
+  upgrade (`storage._backfill_review_verdicts`). (Important #2.)
+- [x] T025 [US3] Document the token's scope (it guards only `/api/v1`) in the
+  README and the Settings UI. (Important #3.)
+- [x] T026 [US3] Add a **Clear** control for the API token in the Settings UI.
+  (Important #4.)
+- [x] T027 Make the API's repo filter slug-only in `list_review_statuses`
+  (matching `get_pr_by_number`) and fix the `_result_from_row` repo fallback.
+  (Nit #5, #6.)
+- [x] T028 Reject a non-numeric `limit` with `400`; clamp numeric ones.
+  (Nit #8.)
+- [x] T029 Drop the unused comment lookup from `get_pr_by_number`. (Nit #9.)
+- [x] T030 Add tests for anchoring, the backfill, `/api/reviewed`'s verdict,
+  status/list field parity, `limit` validation, `pr_id` precedence, slug-only
+  matching and clearing the token. (Nit #10.)
+
+
+---
+
 ## Dependencies & Execution Order
 
 - Setup → Foundational → User Stories → Polish.

@@ -63,8 +63,8 @@ Return the review as Markdown.
 
 # Appended to every rendered review prompt -- including custom templates -- so a
 # completed review always carries a machine-readable outcome. See
-# specs/008-review-status-api. The parser tolerates Markdown around the marker and
-# takes the last occurrence, so the verdict line must come last.
+# specs/008-review-status-api. The parser only accepts the marker as the final
+# content line, so it must come last.
 VERDICT_INSTRUCTION = """
 
 ---
@@ -76,22 +76,46 @@ REVIEW_VERDICT: FAIL
 Use PASS when the change is good to merge, and FAIL when it has blocking issues.
 """
 
-# Case-insensitive so a lowercased marker still counts; ``\b`` avoids matching a
-# word such as "PASSED". The last match wins.
-_VERDICT_RE = re.compile(r"REVIEW_VERDICT:\s*(PASS|FAIL)\b", re.IGNORECASE)
+# The verdict must be the marker alone on the final content line of the output.
+# Anchoring there (rather than anywhere in the text) stops diff content or a
+# quoted example from deciding the result, and stops the prompt's own example
+# from being read as a verdict when the agent emits none. Surrounding Markdown
+# (bold, bullets, code fences) is tolerated.
+_VERDICT_LINE_RE = re.compile(
+    r"[\s>*_`#-]*REVIEW_VERDICT:\s*(PASS|FAIL)[\s*_`.:!>#-]*",
+    re.IGNORECASE,
+)
+
+# Lines that carry no verdict: blank lines, code fences and horizontal rules.
+_DECORATION_RE = re.compile(r"[`*_=~-]{2,}")
+
+
+def _last_content_line(output):
+    """The last meaningful line of ``output``, skipping blanks and decorations."""
+    for line in reversed((output or "").splitlines()):
+        stripped = line.strip()
+        if not stripped or _DECORATION_RE.fullmatch(stripped):
+            continue
+        return stripped
+    return None
 
 
 def parse_verdict(output):
     """Parse the verdict marker from an agent's output.
 
-    Returns ``"passed"`` or ``"failed"`` for the last ``REVIEW_VERDICT`` marker
-    found, or ``None`` when the output has none (or is empty). Tolerant of
-    surrounding Markdown and code fences.
+    The marker must be the last non-trivial line (trailing blank lines, code
+    fences or horizontal rules are ignored), so content after the agent's own
+    verdict -- for example a line quoted from the diff -- cannot override it.
+    Returns ``"passed"`` or ``"failed"``, or ``None`` when the final line is not
+    a verdict marker (or there is no output).
     """
-    matches = _VERDICT_RE.findall(output or "")
-    if not matches:
+    line = _last_content_line(output)
+    if line is None:
         return None
-    return "passed" if matches[-1].upper() == "PASS" else "failed"
+    match = _VERDICT_LINE_RE.fullmatch(line)
+    if not match:
+        return None
+    return "passed" if match.group(1).upper() == "PASS" else "failed"
 
 
 _active_lock = threading.Lock()
