@@ -466,6 +466,13 @@ def existing_pr_meta():
     return {row["id"]: row["updated_at"] for row in rows}
 
 
+def existing_pr_states():
+    """Map of stored PR id -> state, used to spot open -> closed/merged changes."""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT id, state FROM pull_requests").fetchall()
+    return {row["id"]: row["state"] for row in rows}
+
+
 def save_pr(pr, comments=None):
     """Insert or update a pull request and its comments."""
     labels = pr.get("labels")
@@ -813,6 +820,31 @@ def dismiss_review(pr_id):
             "SELECT 1 FROM pull_requests WHERE id = ?", (pr_id,)
         ).fetchone()
         if not exists:
+            return False
+        conn.execute(
+            """
+            INSERT INTO dismissed_reviews (pr_id, dismissed_at) VALUES (?, ?)
+            ON CONFLICT (pr_id) DO UPDATE SET dismissed_at = excluded.dismissed_at
+            """,
+            (pr_id, _now()),
+        )
+        return True
+
+
+def archive_review(pr_id):
+    """Archive a *reviewed* pull request from the "AI Reviewed" list.
+
+    Only requests that have at least one review are in the list, so a request
+    with no reviews is left untouched. Archiving is the same dismissal the
+    sidebar's remove button writes: the request is hidden, its review history is
+    kept, and starting a new review brings it back. Returns True when the request
+    has a review (whether or not it was already archived).
+    """
+    with get_conn() as conn:
+        reviewed = conn.execute(
+            "SELECT 1 FROM reviews WHERE pr_id = ? LIMIT 1", (pr_id,)
+        ).fetchone()
+        if not reviewed:
             return False
         conn.execute(
             """

@@ -1311,17 +1311,25 @@
             } catch (err) { /* keep polling */ }
         }
 
-        function dismissReviewed(prId) {
-            fetch('/api/reviewed/' + encodeURIComponent(prId), { method: 'DELETE' })
-                .then(r => r.json())
-                .then(() => {
-                    const item = document.querySelector(
-                        '.reviewed-item[data-pr-id="' + prId + '"]');
-                    if (item) item.remove();
-                    updateReviewedCount();
-                    reviewedSignature = null;
-                })
-                .catch(() => {});
+        async function dismissReviewed(prId) {
+            const item = document.querySelector(
+                '.reviewed-item[data-pr-id="' + prId + '"]');
+            const link = item ? item.querySelector('.reviewed-link') : null;
+            const label = (link && link.getAttribute('title')) || ('#' + prId);
+            const ok = await appConfirm({
+                title: 'Remove from AI Reviewed',
+                message: 'Remove ' + label + ' from the AI Reviewed list? '
+                    + 'The review history is kept, and running a new review brings it back.',
+                okText: 'Remove',
+                okClass: 'btn-danger'
+            });
+            if (!ok) return;
+            try {
+                await fetch('/api/reviewed/' + encodeURIComponent(prId), { method: 'DELETE' });
+                if (item) item.remove();
+                updateReviewedCount();
+                reviewedSignature = null;
+            } catch (err) { /* leave the entry in place if the request fails */ }
         }
 
         const reviewedListEl = document.getElementById('reviewedList');

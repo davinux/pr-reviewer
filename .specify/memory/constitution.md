@@ -147,7 +147,10 @@ existing one.
    `tasks.md`.
 5. **Implement** — work the tasks on a feature branch; add or extend tests for
    the behaviour; run the full suite.
-6. **Review** — the pull request is checked against this constitution and
+6. **Ship** — once the suite passes and the work matches the spec, commit the
+   branch and open a pull request. This is the default outcome of finished work,
+   not a step to wait to be asked for.
+7. **Review** — the pull request is checked against this constitution and
    against the feature's spec, and the spec is updated if the implementation
    diverged.
 
@@ -169,4 +172,4 @@ together in the same pull request.
 - When guidance here is silent, prefer the option that best serves Principles
   I–IV (local, provider-agnostic, agent-agnostic, no surprises).
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-18 | **Last Amended**: 2026-10-18
+**Version**: 1.0.1 | **Ratified**: 2026-10-18 | **Last Amended**: 2026-10-18

@@ -108,6 +108,11 @@ history survives.
   `DELETE /api/reviewed/<id>`), `templates/index.html` (sidebar list, 15s
   refresh, pulsing running state).
 - **Tests**: exercised indirectly through the review lifecycle in
-  `tests/test_auto_review.py`.
+  `tests/test_auto_review.py`, and directly in `tests/test_archive_reviewed.py`
+  (spec 007).
 - **Known limitations**: the list is a fixed-size, newest-first window of
   reviewed requests.
+- **Extended by**: spec
+  [007-auto-archive-reviewed](../007-auto-archive-reviewed/spec.md). It adds
+  automatic archiving when a tracked request transitions to closed/merged and a
+  confirmation before the sidebar's remove control (FR-004) runs.
