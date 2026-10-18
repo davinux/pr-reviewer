@@ -59,6 +59,25 @@
         .state-closed { background: #cf222e; }
         #reviewOutput { min-height: 1rem; }
 
+        /* Review history (request page sidebar) */
+        .review-history { padding: .25rem 0; }
+        .review-history-row {
+            padding: .5rem .75rem; border-bottom: 1px solid var(--app-border);
+        }
+        .review-history-row:last-child { border-bottom: 0; }
+        .review-badge {
+            font-size: .62rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: .03em; border-radius: 999px; padding: .1rem .5rem;
+            color: #fff; background: var(--app-icon); white-space: nowrap;
+        }
+        .review-status.status-done { background: var(--app-add); }
+        .review-status.status-error { background: var(--app-del); }
+        .review-status.status-running { background: #d29922; }
+        .review-status.status-preparing { background: var(--app-accent); }
+        .review-verdict.verdict-passed { background: var(--app-add); }
+        .review-verdict.verdict-failed { background: var(--app-del); }
+        .review-verdict.verdict-unknown { background: var(--app-icon); }
+
         /* Commits */
         .commit-row {
             display: flex; align-items: flex-start; gap: .75rem;
@@ -386,6 +405,39 @@
                             {% endif %}
                         </div>
                     </div>
+                </div>
+
+                <!-- Review history: every run for this request -->
+                <div class="panel mt-3">
+                    <div class="panel-header d-flex justify-content-between align-items-center">
+                        <span>Reviews</span>
+                        <span class="badge app-count-badge">{{ reviews | length }}</span>
+                    </div>
+                    {% if reviews %}
+                    <div class="review-history">
+                        {% for r in reviews %}
+                        <div class="review-history-row">
+                            <div class="d-flex align-items-center justify-content-between gap-2">
+                                <span class="small fw-semibold">#{{ r.id }}</span>
+                                <span class="d-flex align-items-center gap-1">
+                                    {% if r.verdict_label %}
+                                    <span class="review-badge review-verdict verdict-{{ r.verdict }}">{{ r.verdict_label }}</span>
+                                    {% endif %}
+                                    <span class="review-badge review-status status-{{ r.status or 'pending' }}">{{ r.status_label }}</span>
+                                </span>
+                            </div>
+                            <div class="muted small mt-1">
+                                {{ r.agent }}{% if r.model %} ({{ r.model }}){% endif %}
+                                &middot; {{ (r.created_at or '')[:16].replace('T', ' ') }}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="panel-body">
+                        <p class="markdown-empty mb-0">No reviews yet. Run one above.</p>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>

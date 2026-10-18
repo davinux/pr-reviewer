@@ -39,6 +39,9 @@ except the GitHub/GitLab API calls and whatever your chosen agent does.
   with its latest status; requests that are merged or closed are archived
   automatically, and you can clear the ones you are done with (after a
   confirmation).
+- **Review history lists** — a request's page sidebar lists every review it has
+  with its status and verdict, and the main sidebar shows the most recent
+  reviews across all repositories, refreshing as runs progress.
 - **Review status API** — every completed review carries a machine-readable
   verdict (pass/fail) that other services can query over a small read-only HTTP
   API, with interactive Swagger docs at <http://localhost:5000/api/docs>.
@@ -140,9 +143,10 @@ A small `unittest` suite covers the per-repository settings (parsing, the
 inherit/override/clear round trip, multi-host lookups and input validation), the
 automatic review trigger for watched repositories (including re-reviews when a
 reviewed request gains commits), the auto-archive of reviewed requests that
-finish, and the review-status API (verdict parsing, the status and
-list endpoints, token authentication and the Swagger/OpenAPI endpoints). Run it
-with:
+finish, the review history sidebars (full per-request history, the cross-request
+review list, and their rendering), and the review-status API (verdict parsing,
+the status and list endpoints, token authentication and the Swagger/OpenAPI
+endpoints). Run it with:
 
 ```bash
 python3 -m unittest discover -s tests
@@ -180,7 +184,8 @@ the same path on different hosts never collide.
    changed** tabs: read the description and comments, browse the commits, and
    review the diffs (switch between **Unified** and **Split** layouts).
 6. Choose an agent and click **Run review**. Watch the status until it
-   finishes, then read the review. Earlier reviews are under **History**.
+   finishes, then read the review. Earlier reviews are under **History**, and the
+   page's sidebar lists every review of the request with its status and verdict.
 
 The sidebar can be resized by dragging the divider on its right edge. Double-click
 the divider to reset it to the default width; the choice is saved in the browser.
@@ -260,6 +265,23 @@ Notes:
 - Removing an entry only hides it from the list; the review history is kept. Run
   a new review on the request and it reappears.
 - Removing a repository (or deleting a request) removes its entries too.
+
+## Review history
+
+Every review a request has is visible at a glance, without opening its output:
+
+- The **request page**'s right-hand sidebar lists all of the request's reviews,
+  each with its agent, model, when it ran, its status and its verdict. The review
+  panel above still shows the selected review's output — use **History** to
+  switch between them.
+- The dashboard's main sidebar has a **Reviews** section listing the most recent
+  reviews across every repository, newest first. Click an entry to open its
+  request. The list refreshes on its own as reviews progress.
+
+Entries show the **result only** (status and verdict). To read a review's text,
+open the request and use the review panel's **History** selector. Removing a
+request from the **AI Reviewed** list does **not** remove it from the review
+lists — that dismissal is scoped to the one list, and the history is kept.
 
 ## Review status API
 
@@ -536,6 +558,7 @@ backfilled). `data/` is gitignored. To reset, stop the app and delete the folder
 | `GET` | `/api/agents` | Supported agents, availability, and effective command templates. |
 | `GET` | `/api/agents/<id>/models` | Models an agent reports; `?refresh=1` bypasses the cache. |
 | `POST` | `/api/pr/<id>/review` | Start a review: `{"agent": "...", "model": "..."}`. |
+| `GET` | `/api/reviews` | Recent reviews across requests with status/verdict (sidebar list). |
 | `GET` | `/api/reviews/<id>` | Review status/output. |
 | `GET` | `/api/pr/<id>/reviews` | Review history for a request. |
 | `GET` | `/api/reviewed` | AI-reviewed requests with their latest status (sidebar list). |
@@ -575,6 +598,7 @@ pr-reviewer/
 │   ├── test_auto_review.py       # Automatic review of watched repos
 │   ├── test_archive_reviewed.py  # Auto-archive of reviewed requests
 │   ├── test_reviewer.py          # Review run outcome (done/error)
+│   ├── test_review_history.py    # Review history sidebars
 │   └── test_api.py               # Review-status API, verdict and Swagger docs
 ├── scripts/
 │   ├── start.sh           # Start the server in the background

@@ -223,17 +223,25 @@ def _state_summary(count, total, state):
     return f"{count} {label.lower()} · {total} total"
 
 
+def _label_review(item):
+    """Add the display labels for a review's status and verdict, in place."""
+    status = item.get("status") or "pending"
+    item["status_label"] = REVIEW_STATUS_LABELS.get(status, status.title())
+    verdict = item.get("verdict")
+    item["verdict_label"] = (
+        REVIEW_VERDICT_LABELS.get(verdict, verdict.title()) if verdict else None
+    )
+    return item
+
+
 def reviewed_prs_payload():
     """AI-reviewed pull requests with a display label for their latest status."""
-    items = storage.list_reviewed_prs()
-    for item in items:
-        status = item.get("status") or "pending"
-        item["status_label"] = REVIEW_STATUS_LABELS.get(status, status.title())
-        verdict = item.get("verdict")
-        item["verdict_label"] = (
-            REVIEW_VERDICT_LABELS.get(verdict, verdict.title()) if verdict else None
-        )
-    return items
+    return [_label_review(item) for item in storage.list_reviewed_prs()]
+
+
+def review_history_payload(items):
+    """Label reviews for the sidebar lists (status + verdict per review)."""
+    return [_label_review(item) for item in items]
 
 
 def auto_review_agent(settings):
@@ -473,6 +481,7 @@ def index():
         total_prs=storage.count_prs(),
         open_prs=storage.count_prs(state="open"),
         reviewed=reviewed_prs_payload(),
+        recent_reviews=review_history_payload(storage.list_recent_reviews()),
         settings=settings,
         agents=agents.detect_agents(settings),
         default_review_prompt=reviewer.DEFAULT_REVIEW_PROMPT,
@@ -647,7 +656,7 @@ def pr_detail(pr_id):
             pr=pr,
             settings=settings,
             agents=agents.detect_agents(settings),
-            reviews=storage.list_reviews(pr["id"]),
+            reviews=review_history_payload(storage.list_reviews(pr["id"])),
         )
     return "PR not found", 404
 
@@ -687,6 +696,12 @@ def api_review(review_id):
     if not review:
         return jsonify({"error": "review not found"}), 404
     return jsonify(review)
+
+
+@app.route("/api/reviews")
+def api_reviews():
+    """Recent reviews across requests, for the dashboard sidebar list."""
+    return jsonify({"reviews": review_history_payload(storage.list_recent_reviews())})
 
 
 @app.route("/api/pr/<int:pr_id>/reviews")

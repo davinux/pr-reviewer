@@ -838,13 +838,54 @@ def get_review(review_id):
     return _review_dict(row) if row else None
 
 
-def list_reviews(pr_id, limit=20):
+def list_reviews(pr_id, limit=None):
+    """Every review for a request, newest first.
+
+    ``limit`` caps how many are returned; ``None`` (the default) returns the
+    whole history, which the request page's sidebar shows.
+    """
+    query = "SELECT * FROM reviews WHERE pr_id = ? ORDER BY id DESC"
+    params = [pr_id]
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+    with get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [_review_dict(row) for row in rows]
+
+
+def list_recent_reviews(limit=50):
+    """The newest reviews across every request, newest first.
+
+    Each item is a review shape plus the owning request's identity (``number``,
+    ``title``, ``full_name`` and ``slug``), which the dashboard sidebar needs to
+    name and link the request. ``limit`` bounds the window so the list stays
+    readable; reviews of deleted requests are gone with them (cascade).
+    """
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM reviews WHERE pr_id = ? ORDER BY id DESC LIMIT ?",
-            (pr_id, limit),
+            """
+            SELECT r.*,
+                   p.number    AS pr_number,
+                   p.title     AS pr_title,
+                   p.full_name AS pr_full_name,
+                   p.slug      AS pr_slug
+            FROM reviews r
+            JOIN pull_requests p ON p.id = r.pr_id
+            ORDER BY r.id DESC
+            LIMIT ?
+            """,
+            (limit,),
         ).fetchall()
-    return [_review_dict(row) for row in rows]
+    items = []
+    for row in rows:
+        item = _review_dict(row)
+        item["number"] = row["pr_number"]
+        item["title"] = row["pr_title"]
+        item["full_name"] = row["pr_full_name"]
+        item["slug"] = row["pr_slug"]
+        items.append(item)
+    return items
 
 
 def latest_review(pr_id):
