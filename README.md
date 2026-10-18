@@ -435,6 +435,13 @@ pr-reviewer/
 ├── agents.py              # Agent registry: detection + command templates
 ├── reviewer.py            # Workspace checkout + review orchestration
 ├── requirements.txt
+├── AGENTS.md              # Context + workflow for AI coding agents
+├── specs/                 # Feature specifications (spec-driven development)
+│   ├── README.md          # The workflow and the feature index
+│   └── 0NN-feature/       # One folder per feature (spec.md, plan.md, tasks.md)
+├── .specify/              # Constitution + spec/plan/tasks templates
+│   ├── memory/constitution.md
+│   └── templates/
 ├── tests/
 │   ├── test_repo_settings.py  # Per-repository settings tests
 │   └── test_auto_review.py    # Automatic review of watched repos
@@ -452,6 +459,32 @@ pr-reviewer/
     ├── favicon.ico        # Multi-size raster favicon served at /favicon.ico
     └── icon-180.png       # Rasterized icon (180x180) for iOS home-screen bookmarks
 ```
+
+## Spec-driven development
+
+New features are described in a specification under `specs/` before they are
+built, and the spec ships with the code. The project's rules live in
+[`.specify/memory/constitution.md`](.specify/memory/constitution.md); the process
+is documented in [`specs/README.md`](specs/README.md), and
+[`AGENTS.md`](AGENTS.md) is the short version for AI coding agents.
+
+The workflow, with a template for each step in `.specify/templates/`:
+
+| Step | Produces |
+| --- | --- |
+| `/specify` | `specs/NNN-feature/spec.md` — prioritised user stories, requirements, success criteria |
+| Clarify | resolved `[NEEDS CLARIFICATION]`s, checked against the review checklist |
+| `/plan` | `specs/NNN-feature/plan.md` — approach, affected modules, constitution check |
+| `/tasks` | `specs/NNN-feature/tasks.md` — ordered, independently testable tasks |
+| Implement | merged code + tests, with the spec updated if behaviour diverged |
+
+A new feature takes the next free number and a short kebab-case name, for
+example `specs/007-review-priority-labels/`.
+
+The first six specs (`001`–`006`) were **retrofitted** onto features that already
+shipped, so they are the as-is baseline: status `Implemented`, each with an
+*Implementation Notes* section mapping requirements to the code and tests. When
+you change one of those features, update its spec in the same pull request.
 
 ## Troubleshooting
 
