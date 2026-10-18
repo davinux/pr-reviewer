@@ -104,6 +104,11 @@ watch indicator in the list; unwatch and confirm it disappears.
   because nothing was known before.
 - **Interval between syncs**: several commits pushed between two syncs produce a
   single re-review of the latest head, not one per commit.
+- **Provider head vs checked-out head**: a review records the commit it actually
+  checked out, and the provider reports the same commit (GitHub `pull.head.sha`,
+  GitLab `sha` — the source-branch tip `refs/merge-requests/<iid>/head` resolves
+  to), so the baseline converges after one re-review and later syncs stop
+  triggering.
 
 ## Requirements *(mandatory)*
 

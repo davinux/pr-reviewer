@@ -281,6 +281,15 @@ def start_auto_reviews(requests, settings):
     return started
 
 
+def _head_value(value):
+    """A head commit as a stripped string, tolerating a non-string value.
+
+    Provider payloads are consumed as-is; a malformed head (a number, say) must
+    not raise inside the sync loop and abort the whole run.
+    """
+    return "" if value is None else str(value).strip()
+
+
 def _has_new_commits(previous_review, entry):
     """True when a request's head moved on since its latest review.
 
@@ -290,8 +299,8 @@ def _has_new_commits(previous_review, entry):
     """
     if not previous_review:
         return False
-    reviewed = (previous_review.get("head_sha") or "").strip()
-    current = (entry.get("head_sha") or "").strip()
+    reviewed = _head_value(previous_review.get("head_sha"))
+    current = _head_value(entry.get("head_sha"))
     return bool(reviewed) and bool(current) and reviewed != current
 
 
@@ -469,7 +478,7 @@ def index():
         state_summary=_state_summary(pr_counts[state], pr_counts["all"], state),
         pr_counts=pr_counts,
         pr_data=storage.list_prs(selected_slug, state),
-        watched_slugs={r["slug"] for r in repos if r.get("watch")},
+        watched_slugs={r["slug"] for r in repos if r.get("watch") and r.get("slug")},
         total_prs=storage.count_prs(),
         open_prs=storage.count_prs(state="open"),
         reviewed=reviewed_prs_payload(),

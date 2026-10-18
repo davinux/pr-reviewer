@@ -236,6 +236,46 @@ class AutoReviewTest(unittest.TestCase):
             started = app_module.start_auto_reviews([(1, storage.get_repo(SLUG))], {})
         self.assertEqual(started, 0)
 
+    def test_recorded_head_suppresses_the_next_re_review(self):
+        # A re-review records the head it actually checked out; the following
+        # sync, which reports the same provider head, must not review again.
+        self._add_repo(watch=True)
+        self._store_reviewed(1, 1, head_sha="aaa")
+
+        created = []
+
+        def fake_start(pr, agent_id, model, settings):
+            review_id = storage.create_review(
+                pr["id"], "acme/api", pr["number"], agent_id, model,
+                head_sha=pr.get("head_sha"),
+            )
+            created.append(review_id)
+            return review_id
+
+        entry = _pr(1, 1, updated="2024-02-01T00:00:00Z", head_sha="bbb")
+        with mock.patch.object(providers, "get_provider", lambda name: FakeProvider([entry])), \
+             mock.patch.object(agents, "available_agents",
+                               lambda settings=None: [{"id": "opencode"}]), \
+             mock.patch.object(reviewer, "start_review", fake_start):
+            first = app_module.sync_repos()
+            self.assertEqual(len(created), 1)
+            # The review finishes by recording the commit it checked out.
+            with mock.patch.object(reviewer, "_git", lambda *a, **k: "bbb\n"):
+                reviewer._record_head_sha(created[0], "/tmp/ws")
+            second = app_module.sync_repos()
+
+        self.assertEqual(first["auto_reviewed"], 1)
+        self.assertNotIn("auto_reviewed", second)
+        self.assertEqual(len(created), 1)
+        self.assertEqual(storage.latest_review(1)["head_sha"], "bbb")
+
+    def test_has_new_commits_tolerates_non_string_heads(self):
+        # A malformed provider head must not raise and abort the sync loop.
+        self.assertFalse(app_module._has_new_commits(None, {"head_sha": "x"}))
+        self.assertTrue(app_module._has_new_commits({"head_sha": 1}, {"head_sha": 2}))
+        self.assertFalse(app_module._has_new_commits({"head_sha": 7}, {"head_sha": 7}))
+        self.assertFalse(app_module._has_new_commits({"head_sha": 7}, {"head_sha": None}))
+
     # -- agent selection --------------------------------------------------- #
     def test_auto_review_agent_prefers_first_installed(self):
         with mock.patch.object(agents, "available_agents",

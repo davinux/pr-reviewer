@@ -477,7 +477,12 @@ def _gitlab_entry(mr, repo):
         "labels": mr.get("labels") or [],
         "base_ref": mr.get("target_branch") or "main",
         "head_ref": mr.get("source_branch"),
-        "head_sha": mr.get("sha"),
+        # ``sha`` is the source-branch tip -- the same commit that
+        # ``refs/merge-requests/<iid>/head`` (what the review checks out)
+        # resolves to -- so a head recorded from the checkout converges with
+        # this value and the re-review trigger settles after one run. Fall back
+        # to the diff ref when the field is absent on older API versions.
+        "head_sha": mr.get("sha") or (mr.get("diff_refs") or {}).get("head_sha"),
         "additions": None,
         "deletions": None,
         "changed_files": changed_files,

@@ -568,6 +568,7 @@ pr-reviewer/
 │   ├── test_repo_settings.py     # Per-repository settings tests
 │   ├── test_auto_review.py       # Automatic review of watched repos
 │   ├── test_archive_reviewed.py  # Auto-archive of reviewed requests
+│   ├── test_providers.py         # Provider head-commit extraction
 │   └── test_api.py               # Review-status API, verdict and Swagger docs
 ├── scripts/
 │   ├── start.sh           # Start the server in the background
