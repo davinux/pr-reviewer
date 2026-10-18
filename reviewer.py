@@ -28,6 +28,14 @@ WORKSPACES_DIR = os.path.join(storage.DATA_DIR, "workspaces")
 DEFAULT_REVIEW_TIMEOUT = 900
 DEFAULT_MAX_DESCRIPTION_CHARS = 8000
 
+# Live log of a running review (see specs/011-review-timer-and-logs). The log is
+# flushed to the database at most this often, so a chatty agent does not hammer
+# SQLite, and is capped so it cannot grow without bound. The complete review
+# output is stored separately, in full.
+LOG_FLUSH_SECONDS = 1.0
+MAX_LOG_CHARS = 200_000
+LOG_TRUNCATED_NOTICE = "[... earlier log truncated ...]\n"
+
 # The prompt template used when ``review_prompt`` is not set in Settings.
 # Placeholders: {kind}, {kind_title}, {provider}, {host}, {repo}, {number},
 # {title}, {author}, {url}, {base_ref}, {head_ref}, {body}, {diff_command}.
@@ -173,6 +181,54 @@ def _redact(text, token):
     return text
 
 
+class _ReviewLog:
+    """A bounded, token-redacted transcript of a review run.
+
+    The agent's stdout/stderr is appended as it arrives (from the streaming
+    reader threads), and the joined text is flushed to the review row at most
+    every ``flush_seconds`` -- plus a forced flush when the run ends. When the
+    text exceeds ``max_chars`` the oldest chunks are dropped, so the newest
+    output (what someone watching a running review cares about) is always kept.
+    Token redaction is applied on every write, never to the in-memory buffer.
+    """
+
+    def __init__(self, review_id, token=None, max_chars=MAX_LOG_CHARS,
+                 flush_seconds=LOG_FLUSH_SECONDS):
+        self.review_id = review_id
+        self.token = token
+        self.max_chars = max_chars
+        self.flush_seconds = flush_seconds
+        self._chunks = []
+        self._size = 0
+        self._last_flush = 0.0
+        self._lock = threading.Lock()
+
+    def render(self):
+        """The stored form: the whole log, token-redacted."""
+        with self._lock:
+            text = "".join(self._chunks)
+        return _redact(text, self.token) or ""
+
+    def append(self, chunk):
+        if not chunk:
+            return
+        with self._lock:
+            self._chunks.append(chunk)
+            self._size += len(chunk)
+            while self._size > self.max_chars and len(self._chunks) > 1:
+                self._size -= len(self._chunks.pop(0))
+        self.flush()
+
+    def flush(self, force=False):
+        """Persist the log if the flush interval has passed (or ``force``)."""
+        now = time.time()
+        with self._lock:
+            if not force and now - self._last_flush < self.flush_seconds:
+                return
+            self._last_flush = now
+        storage.update_review(self.review_id, log=self.render())
+
+
 def _git(args, cwd, token=None, timeout=600):
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     proc = subprocess.run(
@@ -306,17 +362,27 @@ def _run_review(review_id, pr, agent_id, model, settings):
     token = providers.token_for(repo["provider"], settings)
     timeout = _as_int(settings.get("review_timeout"), DEFAULT_REVIEW_TIMEOUT)
     started = time.time()
+    log = _ReviewLog(review_id, token)
 
     def finish(status, **fields):
         fields.setdefault("finished_at", _now())
         fields.setdefault("duration_ms", int((time.time() - started) * 1000))
+        log.append(f"\n[review {status}]\n")
+        log.flush(force=True)
+        fields.setdefault("log", log.render())
         storage.update_review(review_id, status=status, **fields)
+
+    def on_output(stream, line):
+        # Prefix stderr so the two interleaved streams stay readable as one log.
+        log.append(line if stream == "stdout" else f"[stderr] {line}")
 
     with _workspace_lock(repo["slug"]):
         try:
             storage.update_review(review_id, status="preparing")
+            log.append("Preparing workspace (clone / fetch / checkout)…\n")
             workspace = prepare_workspace(repo, pr, token, settings)
             storage.update_review(review_id, workspace=workspace)
+            log.append(f"Workspace: {workspace}\n")
             _record_head_sha(review_id, workspace, token)
 
             prompt = build_prompt(pr, pr.get("base_ref") or "main", settings)
@@ -327,8 +393,11 @@ def _run_review(review_id, pr, agent_id, model, settings):
 
             display = " ".join(shlex.quote("<prompt>" if arg == prompt else arg) for arg in command)
             storage.update_review(review_id, status="running", command=_redact(display, token))
+            log.append(f"Running: {_redact(display, token)}\n\n")
 
-            proc = agents.run(command, cwd=workspace, timeout=timeout)
+            proc = agents.run_streaming(
+                command, cwd=workspace, timeout=timeout, on_output=on_output
+            )
             output = (proc.stdout or "").strip()
             stderr = _redact((proc.stderr or "").strip(), token)
             verdict = parse_verdict(output)

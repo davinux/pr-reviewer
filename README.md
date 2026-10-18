@@ -35,6 +35,9 @@ except the GitHub/GitLab API calls and whatever your chosen agent does.
   checkout and captures the agent's Markdown review.
 - **Async with live status** — reviews run in the background and the page polls
   for progress (preparing → running → done/error).
+- **Live timer & logs** — a running review shows a ticking timer and the agent's
+  output as it is produced, so a long run never looks stuck; the log stays with
+  the review afterwards.
 - **AI Reviewed list** — the sidebar tracks every reviewed pull/merge request
   with its latest status; requests that are merged or closed are archived
   automatically, and you can clear the ones you are done with (after a
@@ -67,7 +70,8 @@ except the GitHub/GitLab API calls and whatever your chosen agent does.
 4. It runs your chosen agent in that checkout with a review prompt. The agent
    inspects the diff and surrounding code and prints a Markdown review.
 5. The review is saved to the database and shown on the request page, with a
-   history of previous reviews.
+   history of previous reviews. While it runs, the page shows a live timer and
+   the agent's output streaming into the **Logs** area.
 6. The agent ends its review with a machine-readable verdict
    (`REVIEW_VERDICT: PASS` or `REVIEW_VERDICT: FAIL`) that PR Reviewer parses and
    stores, so the outcome can be read by other tools (see *Review status API*).
@@ -77,6 +81,26 @@ CLI exits non-zero *after* printing the review — OpenCode does this, for examp
 when its web-search tool is unavailable — the review is still saved as `done`
 with its verdict instead of being discarded as a failure. A non-zero exit with no
 verdict is still an error.
+
+## Review timer and logs
+
+A review that takes several minutes should not look stuck, so the request page's
+**AI Review** panel shows two live aids while a run is in progress:
+
+- **Timer** — a badge that counts up from the moment you clicked **Run review**,
+  updating every second. It freezes on the total time when the review finishes,
+  and the **History** entries and metadata show how long each past review took.
+- **Logs** — the agent's standard output and standard error, streamed into a
+  scrollable pane as they are produced (standard error lines are prefixed with
+  `[stderr]`). While a run is in progress the pane follows the newest output;
+  a **Show/Hide** button collapses it. The log is kept with the review, so you can
+  reopen it later from **History**.
+
+The log is stored locally in the same database as the rest of the review data. It
+is redacted of your provider token before being stored, and it is **bounded** (the
+oldest output is dropped once it grows past a fixed size), so a very chatty agent
+cannot grow the database without limit. The final review output is stored in full
+whether or not it was truncated from the live log.
 
 ## Requirements
 
@@ -140,7 +164,8 @@ A small `unittest` suite covers the per-repository settings (parsing, the
 inherit/override/clear round trip, multi-host lookups and input validation), the
 automatic review trigger for watched repositories (including re-reviews when a
 reviewed request gains commits), the auto-archive of reviewed requests that
-finish, and the review-status API (verdict parsing, the status and
+finish, the live timer and streaming logs (incremental output, token redaction and
+the log cap), and the review-status API (verdict parsing, the status and
 list endpoints, token authentication and the Swagger/OpenAPI endpoints). Run it
 with:
 
@@ -179,8 +204,9 @@ the same path on different hosts never collide.
 5. On the request page use the **Conversation**, **Commits** and **Files
    changed** tabs: read the description and comments, browse the commits, and
    review the diffs (switch between **Unified** and **Split** layouts).
-6. Choose an agent and click **Run review**. Watch the status until it
-   finishes, then read the review. Earlier reviews are under **History**.
+6. Choose an agent and click **Run review**. Watch the timer and the **Logs**
+   area while it runs, then read the review when it finishes. Earlier reviews
+   are under **History**.
 
 The sidebar can be resized by dragging the divider on its right edge. Double-click
 the divider to reset it to the default width; the choice is saved in the browser.
@@ -507,7 +533,7 @@ data/
 | `repos` | Watched repositories (`full_name`, `provider`, `host`, `slug`, `watch`, `settings`). |
 | `pull_requests` | One row per PR/MR (slug, labels, draft, branches, head commit, diff stats, ...). |
 | `comments` | Comments/notes (cascade-deleted with the request). |
-| `reviews` | Agent reviews: agent, model, status, verdict, head commit reviewed, output, error, timing. |
+| `reviews` | Agent reviews: agent, model, status, verdict, head commit reviewed, output, error, log, timing. |
 | `dismissed_reviews` | Requests cleared from the **AI Reviewed** sidebar list. |
 | `notifications` | New-request alerts for watched repositories (cascade-deleted with the request). |
 
@@ -536,7 +562,7 @@ backfilled). `data/` is gitignored. To reset, stop the app and delete the folder
 | `GET` | `/api/agents` | Supported agents, availability, and effective command templates. |
 | `GET` | `/api/agents/<id>/models` | Models an agent reports; `?refresh=1` bypasses the cache. |
 | `POST` | `/api/pr/<id>/review` | Start a review: `{"agent": "...", "model": "..."}`. |
-| `GET` | `/api/reviews/<id>` | Review status/output. |
+| `GET` | `/api/reviews/<id>` | Review status, output and live log. |
 | `GET` | `/api/pr/<id>/reviews` | Review history for a request. |
 | `GET` | `/api/reviewed` | AI-reviewed requests with their latest status (sidebar list). |
 | `DELETE` | `/api/reviewed/<id>` | Remove a request from the AI-Reviewed list. |
@@ -575,6 +601,7 @@ pr-reviewer/
 │   ├── test_auto_review.py       # Automatic review of watched repos
 │   ├── test_archive_reviewed.py  # Auto-archive of reviewed requests
 │   ├── test_reviewer.py          # Review run outcome (done/error)
+│   ├── test_review_logs.py       # Live timer and streaming logs
 │   └── test_api.py               # Review-status API, verdict and Swagger docs
 ├── scripts/
 │   ├── start.sh           # Start the server in the background

@@ -74,7 +74,7 @@ class ReviewOutcomeTest(unittest.TestCase):
                  reviewer.agents, "resolve_command",
                  lambda *a, **k: (["agent", "review"], None),
              ), \
-             mock.patch.object(reviewer.agents, "run", lambda *a, **k: proc):
+             mock.patch.object(reviewer.agents, "run_streaming", lambda *a, **k: proc):
             reviewer._run_review(review_id, pr, "opencode", None, {})
         return storage.get_review(review_id)
 
