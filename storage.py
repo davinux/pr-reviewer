@@ -53,6 +53,20 @@ DEFAULT_SETTINGS = {
     "port": 5000,
 }
 
+# Settings a single repository may override. Everything else is global; the
+# values in ``DEFAULT_SETTINGS`` (edited in the global Settings dialog) are the
+# fallback for any repository that does not override a key.
+REPO_SETTINGS = (
+    "review_prompt",
+    "default_agent",
+    "default_model",
+    "review_timeout",
+    "max_prompt_chars",
+    "max_description_chars",
+)
+# The subset of ``REPO_SETTINGS`` that is numeric.
+REPO_INT_SETTINGS = ("review_timeout", "max_prompt_chars", "max_description_chars")
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS repos (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,6 +75,7 @@ CREATE TABLE IF NOT EXISTS repos (
     host       TEXT NOT NULL DEFAULT 'github.com',
     slug       TEXT,
     watch      INTEGER NOT NULL DEFAULT 0,
+    settings   TEXT,
     added_at   TEXT NOT NULL
 );
 
@@ -153,6 +168,7 @@ _EXTRA_REPO_COLUMNS = {
     "host": "TEXT DEFAULT 'github.com'",
     "slug": "TEXT",
     "watch": "INTEGER NOT NULL DEFAULT 0",
+    "settings": "TEXT",
 }
 
 _EXTRA_PR_COLUMNS = {
@@ -280,6 +296,31 @@ def _slug(host, full_name):
     return f"{host}/{full_name}"
 
 
+def _load_repo_settings(raw):
+    """Parse a repository's JSON settings overrides, tolerating bad data."""
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _repo_dict(row):
+    """A repository row as a dict, with its settings overrides parsed."""
+    keys = row.keys()
+    watch = bool(row["watch"]) if "watch" in keys else False
+    return {
+        "full_name": row["full_name"],
+        "provider": row["provider"] if "provider" in keys and row["provider"] else "github",
+        "host": row["host"] if "host" in keys and row["host"] else "github.com",
+        "slug": row["slug"] if "slug" in keys and row["slug"] else None,
+        "watch": watch,
+        "settings": _load_repo_settings(row["settings"]) if "settings" in keys else {},
+    }
+
+
 def add_repo(full_name, provider="github", host="github.com"):
     """Add a single repository. Returns True when it was newly inserted."""
     return add_repos([full_name], provider=provider, host=host) > 0
@@ -323,12 +364,13 @@ def remove_repo(slug):
 
 
 def list_repos():
-    """Every repository as a record (slug, full_name, provider, host, watch)."""
+    """Every repository as a record (slug, full_name, provider, host, watch, settings)."""
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT full_name, provider, host, slug, watch FROM repos ORDER BY full_name"
+            "SELECT full_name, provider, host, slug, watch, settings "
+            "FROM repos ORDER BY full_name"
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [_repo_dict(row) for row in rows]
 
 
 def list_repo_slugs():
@@ -336,11 +378,28 @@ def list_repo_slugs():
 
 
 def get_repo(slug):
+    """One repository by its unique slug (``<host>/<owner>/<repo>``)."""
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT full_name, provider, host, slug, watch FROM repos WHERE slug = ?", (slug,)
+            "SELECT full_name, provider, host, slug, watch, settings "
+            "FROM repos WHERE slug = ?",
+            (slug,),
         ).fetchone()
-    return dict(row) if row else None
+    return _repo_dict(row) if row else None
+
+
+def set_repo_settings(slug, overrides):
+    """Replace one repository's settings overrides. Returns True if it existed.
+
+    Matches by slug only: a bare ``owner/repo`` is not unique, since the same
+    path may exist on two hosts.
+    """
+    payload = json.dumps(overrides or {})
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE repos SET settings = ? WHERE slug = ?", (payload, slug)
+        )
+        return cur.rowcount > 0
 
 
 def set_repo_watch(slug, watch):
@@ -365,6 +424,7 @@ def repo_stats():
             """
             SELECT r.full_name AS full_name, r.provider AS provider,
                    r.host AS host, r.slug AS slug, r.watch AS watch,
+                   r.settings AS settings,
                    COUNT(p.id) AS count,
                    COUNT(CASE WHEN p.state = 'open' THEN 1 END) AS open_count
             FROM repos r
@@ -373,7 +433,8 @@ def repo_stats():
             ORDER BY r.full_name
             """
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [_repo_dict(row) | {"count": row["count"], "open_count": row["open_count"]}
+            for row in rows]
 
 
 def _get_or_create_repo(conn, full_name, provider="github", host="github.com"):
